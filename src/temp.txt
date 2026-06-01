@@ -1,0 +1,19 @@
+#include <Arduino.h>
+
+
+/**
+ * 初始化
+ */
+void setup()
+{
+  Serial.setTx(PA9);    // 发送信息端口重定向
+  Serial.setRx(PA10);   // 发送信息端口重定向
+  Serial.begin(115200); // 串口初始化
+  ShowMsg("Start..");
+}
+
+void loop()
+{
+  
+}
+

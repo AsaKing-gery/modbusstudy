@@ -1,0 +1,22 @@
+{
+    "files.associations": {
+        "pinconfigured.h": "c",
+        "compare": "cpp",
+        "array": "cpp",
+        "deque": "cpp",
+        "string": "cpp",
+        "unordered_map": "cpp",
+        "vector": "cpp",
+        "string_view": "cpp",
+        "initializer_list": "cpp",
+        "*.tcc": "cpp",
+        "algorithm": "cpp",
+        "ostream": "cpp",
+        "memory": "cpp",
+        "functional": "cpp",
+        "tuple": "cpp",
+        "utility": "cpp",
+        "system_error": "cpp",
+        "type_traits": "cpp"
+    }
+}
