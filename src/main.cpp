@@ -2,19 +2,31 @@
 #include "myShowMsg.h"
 #include "Parameter_Config.h"
 #include "IO_Setting.h"
+#include "myNetworkConfig.h"
 #include "myTask.h"
+#include "myK210.h"
+#include "myESP32C6.h"
+#include "myMQTT_TLS.h"
 
 /*
-//由于STM32在Arduino中默认使用的是内部RC时钟,时钟频率64MHz，所以需要修改系统时钟配置
-//下面外部时钟配置，晶振频率8MHz，PLL时钟频率72MHz
-//将下面的内容替换掉SystemClock_Config()函数中原有的配置
-//文件相对路径：.platformio\packages\framework-arduinoststm32\variants\STM32F1xx\F103C8T_F103CB(T-U)\generic_clock.c
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9; // 8MHz * 9 = 72MHz
+// ============================================
+// F407时钟树配置说明
+// ============================================
+// 天空星F407VET6板载8MHz外部晶振(HSE)
+// 目标: SYSCLK = 168MHz
+//
+// 时钟路径: HSE(8MHz) → PLL_M(div/8) → VCO_in(1MHz) → PLL_N(mul×336) → VCO_out(336MHz)
+//           → PLL_P(div/2) → SYSCLK(168MHz)
+//           → PLL_Q(div/7) → USB(48MHz)
+//
+// 总线分频:
+//   AHB (HCLK)  = SYSCLK / 1 = 168MHz
+//   APB1 (PCLK1) = HCLK / 4  = 42MHz  (低速总线: USART2/3, I2C, SPI2/3)
+//   APB2 (PCLK2) = HCLK / 2  = 84MHz  (高速总线: USART1, SPI1, TIM1, ADC)
+//
+// Arduino框架自动完成时钟初始化，无需手动修改SystemClock_Config()
+// 只需在platformio.ini中设置 board_build.f_cpu = 168000000L
+// ============================================
 */
 void ShowSystemInfo()
 {
@@ -57,36 +69,46 @@ void ShowSystemInfo()
 void setup()
 {
   /*硬件层初始化*/
-  Serial.setTx(PA9);    // 发送信息端口重定向
-  Serial.setRx(PA10);   // 发送信息端口重定向
+  Serial.setTx(PD5);    // 发送信息端口重定向
+  Serial.setRx(PD6);   // 发送信息端口重定向
   Serial.begin(115200); // 串口初始化
   Serial.println("System Version:" + String(Version));
   Serial.println("Remote IO System Start...");
 
-  ShowMsg("", true);
-  // 显示系统信息
-  ShowSystemInfo();
-  // 加载参数
-  Load_Parameter();
-  // GPIO初始化
-  GPIO_Init();
-  // Modbus应用协议初始化
-  ModbusRTU_Initialize();
-  ModbusTCP_Initialize();
-  ShowMsg("", true);
-  ShowMsg("Setup Init Success", true);
-  ShowMsg("", true);
+    ShowMsg("", true);
+    // 显示系统信息
+    ShowSystemInfo();
+    // 加载参数
+    Load_Parameter();
+    // GPIO初始化
+    GPIO_Init();
+    // 网络初始化（DHCP或静态IP）
+    Network_Init();
+    // Modbus应用协议初始化
+    ModbusRTU_Initialize();
+    ModbusTCP_Initialize();
+    // ESP32C6 SPI初始化
+    ESP32C6_SPI_Init();
+    // K210摄像头模块初始化
+    K210_Initialize();
+    // 传感器串口和串口屏串口初始化
+    SensorSerial_Init();
+    // MQTT over TLS 初始化
+    MQTT_TLS_Init();
+    ShowMsg("", true);
+    ShowMsg("Setup Init Success", true);
+    ShowMsg("", true);
 
-  /*任务初始化,创建所有任务*/
-  xTaskCreate(CreateTaskMethods,   // 任务函数的指针，用来调用执行的函数，主要该函数内部必须一直循环，否则会触发看门狗定时器
-              "CreateTaskMethods", // 这个任务的名字，主要用来调试
-              128,                 // 任务的堆栈大小,单位为字，这里分配了128个字堆栈(这个堆栈大小可以通过读取堆栈高水位来检查和调整)
-              NULL,                // 传递给任务函数的参数
-              0,                   // 任务的优先级(优先级，3 (configMAX_PRIORITIES - 1)是最高的，0是最低的。)
-              NULL                 // 用于存储创建的任务句柄的指针
-  );
-  // 开始任务调度器
-  vTaskStartScheduler();
+    /*任务初始化,创建所有任务*/
+    xTaskCreate(CreateTaskMethods,
+                "CreateTaskMethods",
+                128,
+                NULL,
+                0,              // 最低优先级，创建完任务后自删除
+                NULL
+    );
+    // 开始任务调度器
+    vTaskStartScheduler();
 }
 
 void loop()

@@ -1,0 +1,8 @@
+epsilonrt/Modbus-Ethernet@^1.0.3
+bblanchon/ArduinoJson@^7.0.4
+stm32duino/STM32duino FreeRTOS@^10.3.2
+epsilonrt/Modbus-Serial@^2.0.5
+openslab-osu/SSLClient@^1.2.0
+jgromes/RadioLib@^6.6.0
+robtillaart/ADS1X15@^0.4.2
+arduino-libraries/ArduinoMqttClient@^0.1.8

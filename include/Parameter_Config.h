@@ -5,7 +5,7 @@
 #include <IPAddress.h>
 #include "myShowMsg.h"
 
-#define MaxModbusRegNum 20 // 最大寄存器数量
+#define MaxModbusRegNum 30 // 最大寄存器数量 (原20个，扩展10个给LoRa机器人数据)
 #define Version 40501      // 固件版本号,一位年尾号+2位月份+2位日
 
 /**
@@ -13,11 +13,7 @@
  * @param offsetIndex 偏移索引，用于获取不同MCU的唯一标识符，默认0,范围0-3
  * @return MCU唯一标识符
  */
-uint32_t GetMCUId(uint8_t offsetIndex = 0)
-{
-    offsetIndex > 3 ? offsetIndex = 3 : 0;
-    return *(uint32_t *)(0x1FFFF7E8 + (offsetIndex * 4));
-}
+uint32_t GetMCUId(uint8_t offsetIndex = 0);
 
 /**
  * @brief 设备操作选项
@@ -51,54 +47,25 @@ struct Parameter_Config
 };
 
 // 全局变量，保存参数配置
-Parameter_Config myPar = Parameter_Config();
+extern Parameter_Config myPar;
 
 /**
  * @brief 保存参数配置到EEPROM
  *
  * 保存参数配置到EEPROM
  */
-void Save_Parameter()
-{
-    uint32_t recordTime = millis();
-    ShowMsg("Saving parameter", true);
-    EEPROM.put(0, myPar);
-    ShowMsg("Parameter Saved:" + String(millis() - recordTime), true);
-}
+void Save_Parameter();
 
 /**
  * @brief 参数初始化
  */
-void Parameter_Init()
-{
-    ShowMsg("Initializing parameter", true);
-    myPar = Parameter_Config();
-    uint32_t id1 = GetMCUId();  // 获取MCU低32位ID
-    uint32_t id2 = GetMCUId(1); // 获取MCU高32位ID
-    myPar.mac[0] = id1 & 0xFF;
-    myPar.mac[1] = (id1 >> 8) & 0xFF;
-    myPar.mac[2] = (id1 >> 16) & 0xFF;
-    myPar.mac[3] = (id1 >> 24) & 0xFF;
-    myPar.mac[4] = id2 & 0xFF;
-    myPar.mac[5] = (id2 >> 8) & 0xFF;
-    Save_Parameter();
-}
+void Parameter_Init();
 
 /**
  * @brief 从EEPROM中加载参数配置
  *
  * 从EEPROM中加载参数配置，如果是第一次下载程序，则恢复出厂设置
  */
-void Load_Parameter()
-{
-    uint32_t recordTime = millis();
-    ShowMsg("Loading parameter", true);
-    EEPROM.get(0, myPar);     // 从EEPROM中读取参数配置
-    if (myPar.InitFlag != 66) // 如果是第一次下载程序，myPar.InitFlag肯定不是66，则直接调用默认设置并保存到EEPROM，那么下次启动时，myPar.InitFlag肯定是66，则加载参数配置
-    {
-        Parameter_Init();
-    }
-    ShowMsg("Parameter loaded：" + String(millis() - recordTime), true);
-}
+void Load_Parameter();
 
 #endif

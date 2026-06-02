@@ -8,8 +8,8 @@
 //#define UseSerialPrint
 
 #ifdef UseSerialPrint
-// 创建一个互斥锁，避免串口输出时串口输出互相干扰
-SemaphoreHandle_t xMutex = xSemaphoreCreateMutex();
+// 互斥锁声明，定义在globals.cpp中
+extern SemaphoreHandle_t xMutex;
 #endif
 
 /**
