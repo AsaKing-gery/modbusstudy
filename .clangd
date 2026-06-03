@@ -1,0 +1,21 @@
+CompileFlags:
+  Add:
+    - -IC:\.platformio\packages\toolchain-gccarmnoneeabi\arm-none-eabi\include\c++\12.3.1
+    - -IC:\.platformio\packages\toolchain-gccarmnoneeabi\arm-none-eabi\include\c++\12.3.1\arm-none-eabi\thumb\v7e-m+fp\hard
+    - -IC:\.platformio\packages\toolchain-gccarmnoneeabi\arm-none-eabi\include
+    - -D__GNUC__=12
+    - -D__GNUC_MINOR__=3
+    - -D__GNUC_PATCHLEVEL__=1
+    - -Wno-everything
+
+Diagnostics:
+  Suppress:
+    - unused_includes
+    - misc-unused-includes
+  ClangTidy:
+    Remove:
+      - bugprone-*
+      - modernize-*
+      - readability-*
+      - google-*
+      - cppcoreguidelines-*

@@ -80,7 +80,7 @@ void MQTT_TLS_Publish(const char *topic, const char *payload)
 
     if (xSemaphoreTake(xMQTTMutex, pdMS_TO_TICKS(100)) == pdTRUE)
     {
-        mqttClient.beginMessage(topic);
+        mqttClient.beginMessage(topic, true);
         mqttClient.print(payload);
         mqttClient.endMessage();
         xSemaphoreGive(xMQTTMutex);

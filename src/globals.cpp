@@ -13,6 +13,7 @@
 #include "mySensorTask.h"
 #include "myADS1115.h"
 #include "myNetworkConfig.h"
+#include "trust_anchor.h"
 #include "myK210.h"
 #include "myESP32C6.h"
 
@@ -49,8 +50,7 @@ TaskHandle_t xLoRaTaskHandle = NULL;
 
 /* ==================== myMQTT_TLS.h 全局变量定义 ==================== */
 EthernetClient ethernetClient;
-static const br_x509_trust_anchor TAs[] = {};
-SSLClient sslClient(ethernetClient, TAs, 0, PA0, 1, SSLClient::SSL_WARN);
+SSLClient sslClient(ethernetClient, TAs, TAs_NUM, PA0, 1, SSLClient::SSL_WARN);
 MqttClient mqttClient(sslClient);
 volatile bool mqttConnected = false;
 SemaphoreHandle_t xMQTTMutex = NULL;
