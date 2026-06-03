@@ -190,6 +190,7 @@ void MainTask(void *pvParameters)
         {
             timeRecord = millis();
             digitalWrite(RUN_LED, runLedTemp = !runLedTemp);
+            digitalWrite(BOARD_LED, runLedTemp); // 板载运行指示灯PB2，高电平点亮
             myModbusRTU.setHreg(10, timeRecord / 1000);
         }
     }

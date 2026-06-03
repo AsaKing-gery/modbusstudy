@@ -38,6 +38,8 @@ void GPIO_Init()
     pinMode_OutSetting(Output_Y9);
     pinMode_OutSetting(ERROR_LED);
     pinMode_OutSetting(RUN_LED);
+    pinMode(BOARD_LED, OUTPUT);
+    digitalWrite(BOARD_LED, LOW);
     pinMode(HMI_USART_RX, INPUT);
     pinMode(HMI_USART_TX, OUTPUT);
     digitalWrite(HMI_USART_TX, HIGH);

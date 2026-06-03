@@ -92,6 +92,7 @@ extern GPIO_Port Input;
 /*********指示灯定义*********/
 #define ERROR_LED PC13
 #define RUN_LED PC2
+#define BOARD_LED PB2 // 板载运行指示灯，高电平点亮
 
 /*********模拟量定义*********/
 typedef struct
