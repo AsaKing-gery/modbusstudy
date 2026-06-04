@@ -115,3 +115,33 @@ void loop()
 {
   // NVIC_SystemReset();//重启系统
 }
+
+/* FreeRTOS 钩子函数实现 */
+
+/**
+ * @brief 堆栈溢出钩子函数
+ * @param xTask 发生溢出的任务句柄
+ * @param pcTaskName 发生溢出的任务名称
+ */
+extern "C" void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+  Serial.println("[ERROR] Stack overflow detected!");
+  Serial.print("Task: ");
+  Serial.println(pcTaskName);
+  // 进入死循环，等待看门狗复位或调试
+  for (;;)
+  {
+  }
+}
+
+/**
+ * @brief 内存分配失败钩子函数
+ */
+extern "C" void vApplicationMallocFailedHook(void)
+{
+  Serial.println("[ERROR] Memory allocation failed!");
+  // 进入死循环，等待看门狗复位或调试
+  for (;;)
+  {
+  }
+}

@@ -125,13 +125,14 @@ extern char _Min_Stack_Size; /* Defined in the linker script */
 #define configTICK_RATE_HZ                ((TickType_t)1000)
 #define configMAX_TASK_NAME_LEN           (16)
 #define configUSE_TRACE_FACILITY          1
+#define configRECORD_STACK_HIGH_ADDRESS   1
 #define configUSE_16_BIT_TICKS            0
 #define configIDLE_SHOULD_YIELD           1
 #define configUSE_MUTEXES                 1
 #define configQUEUE_REGISTRY_SIZE         8
-#define configCHECK_FOR_STACK_OVERFLOW    0
+#define configCHECK_FOR_STACK_OVERFLOW    2
 #define configUSE_RECURSIVE_MUTEXES       1
-#define configUSE_MALLOC_FAILED_HOOK      0
+#define configUSE_MALLOC_FAILED_HOOK      1
 #define configUSE_APPLICATION_TASK_TAG    0
 #define configUSE_COUNTING_SEMAPHORES     1
 #define configGENERATE_RUN_TIME_STATS     0
