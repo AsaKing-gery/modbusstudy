@@ -167,14 +167,12 @@ void ProcessFanControl(uint8_t cmd)
         return;
     }
 
-    digitalWrite(fanPin, turnOn ? LOW : HIGH);
-
     uint16_t outputState = myModbusRTU.hreg(12);
     uint16_t bitMask = 0;
-    if (fanPin == FAN1_PIN) bitMask = 0x04;
-    else if (fanPin == FAN2_PIN) bitMask = 0x08;
-    else if (fanPin == FAN3_PIN) bitMask = 0x10;
-    else if (fanPin == FAN4_PIN) bitMask = 0x20;
+    if (fanPin == FAN1_PIN) bitMask = 0x40;
+    else if (fanPin == FAN2_PIN) bitMask = 0x80;
+    else if (fanPin == FAN3_PIN) bitMask = 0x100;
+    else if (fanPin == FAN4_PIN) bitMask = 0x200;
 
     if (turnOn)
         outputState |= bitMask;
@@ -206,14 +204,12 @@ void ProcessHumiControl(uint8_t cmd)
         return;
     }
 
-    digitalWrite(humiPin, turnOn ? LOW : HIGH);
-
     uint16_t outputState = myModbusRTU.hreg(12);
     uint16_t bitMask = 0;
-    if (humiPin == HUMI1_PIN) bitMask = 0x40;
-    else if (humiPin == HUMI2_PIN) bitMask = 0x80;
-    else if (humiPin == HUMI3_PIN) bitMask = 0x100;
-    else if (humiPin == HUMI4_PIN) bitMask = 0x200;
+    if (humiPin == HUMI1_PIN) bitMask = 0x04;
+    else if (humiPin == HUMI2_PIN) bitMask = 0x08;
+    else if (humiPin == HUMI3_PIN) bitMask = 0x10;
+    else if (humiPin == HUMI4_PIN) bitMask = 0x20;
 
     if (turnOn)
         outputState |= bitMask;
@@ -230,33 +226,48 @@ void HMIReceiveTask(void *pvParameters)
     vTaskDelay(pdMS_TO_TICKS(800));
     ShowMsg("HMI Receive task started", true);
 
+    uint8_t hmiRxBuffer[8];
+    uint8_t hmiRxIndex = 0;
+    uint32_t hmiLastByteTime = 0;
+
     while (true)
     {
-        if (HMISerial.available() >= 2)
+        while (HMISerial.available() > 0)
         {
-            uint8_t flag = HMISerial.read();
+            if (hmiRxIndex < sizeof(hmiRxBuffer))
+            {
+                hmiRxBuffer[hmiRxIndex++] = HMISerial.read();
+                hmiLastByteTime = millis();
+            }
+            else
+            {
+                HMISerial.read(); // 缓冲区满，丢弃
+            }
+        }
+
+        if (hmiRxIndex >= 2 && (millis() - hmiLastByteTime) >= 5)
+        {
+            uint8_t flag = hmiRxBuffer[0];
+            uint8_t cmd  = hmiRxBuffer[1];
+
             if (flag == HMI_FLAG_FAN_CTRL)
             {
-                uint8_t cmd = HMISerial.read();
                 ProcessFanControl(cmd);
             }
             else if (flag == HMI_FLAG_HUMI_CTRL)
             {
-                uint8_t cmd = HMISerial.read();
                 ProcessHumiControl(cmd);
             }
             else
             {
-                while (HMISerial.available() > 0)
-                {
-                    uint8_t b = HMISerial.peek();
-                    if (b == HMI_FLAG_FAN_CTRL || b == HMI_FLAG_HUMI_CTRL)
-                        break;
-                    HMISerial.read();
-                }
+                ShowMsg("Unknown HMI flag: 0x" + String(flag, HEX), true);
             }
+
+            // 处理完后清空缓冲区
+            hmiRxIndex = 0;
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+
+        vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 

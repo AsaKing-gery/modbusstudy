@@ -59,11 +59,11 @@
 #define FAN3_CLOSE 0x13
 #define FAN4_CLOSE 0x14
 
-/* 风机对应输出引脚 */
-#define FAN1_PIN Output_Y2 // 风机1 -> Y2
-#define FAN2_PIN Output_Y3 // 风机2 -> Y3
-#define FAN3_PIN Output_Y4 // 风机3 -> Y4
-#define FAN4_PIN Output_Y5 // 风机4 -> Y5
+/* 风机对应输出引脚 (Y6-Y9) */
+#define FAN1_PIN Output_Y6 // 风机1 -> Y6
+#define FAN2_PIN Output_Y7 // 风机2 -> Y7
+#define FAN3_PIN Output_Y8 // 风机3 -> Y8
+#define FAN4_PIN Output_Y9 // 风机4 -> Y9
 
 /* 加湿器控制命令码 */
 #define HUMI1_OPEN  0x01
@@ -75,11 +75,11 @@
 #define HUMI3_CLOSE 0x13
 #define HUMI4_CLOSE 0x14
 
-/* 加湿器对应输出引脚 */
-#define HUMI1_PIN Output_Y6 // 加湿器1 -> Y6
-#define HUMI2_PIN Output_Y7 // 加湿器2 -> Y7
-#define HUMI3_PIN Output_Y8 // 加湿器3 -> Y8
-#define HUMI4_PIN Output_Y9 // 加湿器4 -> Y9
+/* 加湿器对应输出引脚 (Y2-Y5) */
+#define HUMI1_PIN Output_Y2 // 加湿器1 -> Y2
+#define HUMI2_PIN Output_Y3 // 加湿器2 -> Y3
+#define HUMI3_PIN Output_Y4 // 加湿器3 -> Y4
+#define HUMI4_PIN Output_Y5 // 加湿器4 -> Y5
 
 /* 传感器轮询周期 - 5秒 */
 #define SENSOR_POLL_INTERVAL_MS 5000

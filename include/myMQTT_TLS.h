@@ -79,24 +79,24 @@ extern volatile bool mqttConnected;
 extern SemaphoreHandle_t xMQTTMutex;
 
 /* 风机和加湿器引脚定义 - 与mySensorTask.h保持一致 */
-#define FAN1_PIN Output_Y2 // 风机1 -> Y2
-#define FAN2_PIN Output_Y3 // 风机2 -> Y3
-#define FAN3_PIN Output_Y4 // 风机3 -> Y4
-#define FAN4_PIN Output_Y5 // 风机4 -> Y5
-#define HUMI1_PIN Output_Y6 // 加湿器1 -> Y6
-#define HUMI2_PIN Output_Y7 // 加湿器2 -> Y7
-#define HUMI3_PIN Output_Y8 // 加湿器3 -> Y8
-#define HUMI4_PIN Output_Y9 // 加湿器4 -> Y9
+#define FAN1_PIN Output_Y6 // 风机1 -> Y6
+#define FAN2_PIN Output_Y7 // 风机2 -> Y7
+#define FAN3_PIN Output_Y8 // 风机3 -> Y8
+#define FAN4_PIN Output_Y9 // 风机4 -> Y9
+#define HUMI1_PIN Output_Y2 // 加湿器1 -> Y2
+#define HUMI2_PIN Output_Y3 // 加湿器2 -> Y3
+#define HUMI3_PIN Output_Y4 // 加湿器3 -> Y4
+#define HUMI4_PIN Output_Y5 // 加湿器4 -> Y5
 
 /* 风机和加湿器对应的Modbus寄存器位掩码 - 与mySensorTask.h保持一致 */
-#define FAN1_BITMASK 0x04
-#define FAN2_BITMASK 0x08
-#define FAN3_BITMASK 0x10
-#define FAN4_BITMASK 0x20
-#define HUMI1_BITMASK 0x40
-#define HUMI2_BITMASK 0x80
-#define HUMI3_BITMASK 0x100
-#define HUMI4_BITMASK 0x200
+#define FAN1_BITMASK 0x40
+#define FAN2_BITMASK 0x80
+#define FAN3_BITMASK 0x100
+#define FAN4_BITMASK 0x200
+#define HUMI1_BITMASK 0x04
+#define HUMI2_BITMASK 0x08
+#define HUMI3_BITMASK 0x10
+#define HUMI4_BITMASK 0x20
 
 /* 设备状态变量和互斥锁 - 定义在myDeviceState.h中，被多个模块共享 */
 #include "myDeviceState.h"

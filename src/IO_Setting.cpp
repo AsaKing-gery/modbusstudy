@@ -6,7 +6,7 @@
 
 void pinMode_OutSetting(uint32_t ulPin)
 {
-    pinMode(ulPin, OUTPUT_OPEN_DRAIN);
+    pinMode(ulPin, OUTPUT);
     digitalWrite(ulPin, HIGH);
 }
 
@@ -74,6 +74,17 @@ void GPIO_Init()
         myPar.Baudrate = 115200;
         break;
     }
+
+    /* 上电初始化：Y2-Y9 继电器全部断开 */
+    digitalWrite(Output_Y2, HIGH);
+    digitalWrite(Output_Y3, HIGH);
+    digitalWrite(Output_Y4, HIGH);
+    digitalWrite(Output_Y5, HIGH);
+    digitalWrite(Output_Y6, HIGH);
+    digitalWrite(Output_Y7, HIGH);
+    digitalWrite(Output_Y8, HIGH);
+    digitalWrite(Output_Y9, HIGH);
+
     ShowMsg("GPIO_Initized", true);
 }
 

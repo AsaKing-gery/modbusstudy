@@ -6,8 +6,8 @@
 #include "Parameter_Config.h"
 #include "myModbus.h"
 #include "mySensorTask.h"
-#include "myMQTT_TLS.h"
-#include "myLoRaTask.h"
+// #include "myMQTT_TLS.h"
+// #include "myLoRaTask.h"
 #include "myADS1115.h"
 #include "myShowMsg.h"
 
@@ -207,8 +207,8 @@ void CreateTaskMethods(void *pvParameters)
     xTaskCreate(ModbusRTUTask, "ModbusRTUSevice", 128, NULL, 5, NULL);
     ShowMsg("ModbusRTU task created.", true);
 
-    xTaskCreate(ModbusTCPTask, "ModbusTCPTask", 128 * 2, NULL, 5, NULL);
-    ShowMsg("ModbusTCP task created.", true);
+    // xTaskCreate(ModbusTCPTask, "ModbusTCPTask", 128 * 2, NULL, 5, NULL);
+    // ShowMsg("ModbusTCP task created.", true);
 
     xTaskCreate(IICTask, "IICTask", 128 * 3, NULL, 3, NULL);
     ShowMsg("IIC task created.", true);
@@ -222,11 +222,11 @@ void CreateTaskMethods(void *pvParameters)
     xTaskCreate(HMIReceiveTask, "HMIReceiveTask", 128 * 2, NULL, 3, NULL);
     ShowMsg("HMI Receive task created.", true);
 
-    xTaskCreate(LoRaReceiveTask, "LoRaReceiveTask", 128 * 2, NULL, 4, NULL);
-    ShowMsg("LoRa Receive task created.", true);
+    // xTaskCreate(LoRaReceiveTask, "LoRaReceiveTask", 128 * 2, NULL, 4, NULL);
+    // ShowMsg("LoRa Receive task created.", true);
 
-    xTaskCreate(MQTT_TLS_Task, "MQTT_TLS_Task", MQTT_TASK_STACK_SIZE, NULL, MQTT_TASK_PRIORITY, NULL);
-    ShowMsg("MQTT TLS task created.", true);
+    // xTaskCreate(MQTT_TLS_Task, "MQTT_TLS_Task", MQTT_TASK_STACK_SIZE, NULL, MQTT_TASK_PRIORITY, NULL);
+    // ShowMsg("MQTT TLS task created.", true);
 
     ShowMsg("All Task Create Success", true);
     ShowMsg("", true);

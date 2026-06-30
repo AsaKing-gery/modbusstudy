@@ -14,6 +14,8 @@ void ModbusRTU_Initialize()
     {
         myModbusRTU.addHreg(i, 0);
     }
+    // 上电默认：Y2-Y9 全部断开 (bit2-bit9 = 0)
+    myModbusRTU.setHreg(12, 0x0000);
     _regs_head = myModbusRTU._regs_head;
     _regs_last = myModbusRTU._regs_last;
     ShowMsg("ModbusRTU initialized", true);

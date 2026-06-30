@@ -2,11 +2,11 @@
 #include "myShowMsg.h"
 #include "Parameter_Config.h"
 #include "IO_Setting.h"
-#include "myNetworkConfig.h"
+// #include "myNetworkConfig.h"
 #include "myTask.h"
-#include "myK210.h"
-#include "myESP32C6.h"
-#include "myMQTT_TLS.h"
+// #include "myK210.h"
+// #include "myESP32C6.h"
+// #include "myMQTT_TLS.h"
 
 /*
 // ============================================
@@ -83,18 +83,18 @@ void setup()
     // GPIO初始化
     GPIO_Init();
     // 网络初始化（DHCP或静态IP）
-    Network_Init();
+    // Network_Init();
     // Modbus应用协议初始化
     ModbusRTU_Initialize();
-    ModbusTCP_Initialize();
+    // ModbusTCP_Initialize();
     // ESP32C6 SPI初始化
-    ESP32C6_SPI_Init();
+    // ESP32C6_SPI_Init();
     // K210摄像头模块初始化
-    K210_Initialize();
+    // K210_Initialize();
     // 传感器串口和串口屏串口初始化
     SensorSerial_Init();
     // MQTT over TLS 初始化
-    MQTT_TLS_Init();
+    // MQTT_TLS_Init();
     ShowMsg("", true);
     ShowMsg("Setup Init Success", true);
     ShowMsg("", true);
