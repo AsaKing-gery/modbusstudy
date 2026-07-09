@@ -1,147 +1,252 @@
-# RemoteIO-一个简单的远程IO板
+# RemoteIO Master V40501
+
+基于 STM32F407VET6 的远程 IO 主控板，集成传感器采集、HMI 串口屏、Modbus 通信和 LoRa 无线功能。
+
 ![图片](/Resource/Image/1.jpg)
 
-### 更新日志
-* 2024.05.01：
-  * 固件版本升级到40501。
-  * 解决了硬件AI输入问题。
-  * 增AI输入部分的程序,将AI输入的4个通道值写入到地址15/16/17/18。
-  * 增加两个寄存器，地址13/14，可用于扩展输入和输出。
-#### 简介
-一个基于STM32F103C8T6单片机的远程IO板，有8路DI，6路DO，4路AI，具备RS485、以太网、TTL串口接口，支持ModbusRTU和ModbusTCP协议，可用于上位机通信、远程控制等场景。
+---
 
-#### 概述
-* 基于STM32F103C8T6单片机
-* 输入：8路全隔离数字输入
-  * 8路DI：DC24V,兼容NPN/PNP输入
-  * 输入带滤波算法，默认5ms
-* 输出：6路全隔离
-  * 2路NPN输出
-  * 4路继电器输出
-  * 输出供电DC24V
-* 拟输入输入：4路，16位ADC，输入电压范围0-5V。
-* 通信端口：RS485x1，以太网x1，TTL串口x1
-  * RS485:支持ModbusRTU协议
-  * 以太网：支持ModbusTCP协议
-  * TTL串口：用于下载程序或打印信息
-* 供电接口：DC24V，支持9-24V输入
-* 开发环境：PlatfromIO
-* 开发框架：Arduino
-* 软件架构：FreeRTOS，具备看门狗功能。
+## 更新日志
+
+### V40501 (当前版本)
+- MCU 升级为 **STM32F407VET6**（天空星，168MHz），替代原 STM32F103C8T6
+- 新增 **HMI 淘晶驰串口屏** 通信（USART4，自定义帧协议）
+- 新增 **传感器状态机**：轮询读取温湿度、CO2、NH3 传感器（RS485 Modbus）
+- 新增 **ADS1115** 16位 ADC 采集（4路 AI，I2C 接口）
+- 新增 **LoRa SX1262** 无线通信支持（可选）
+- 新增 **MQTT/TLS** 物联网接入支持（可选）
+- 新增 **K210 摄像头** SPI 通信支持（可选）
+- 新增 **ESP32C6 WiFi** 协处理器支持（可选）
+- 输出扩展至 **10 路 DO（Y0-Y9）**，其中 Y2-Y9 用于风机/加湿器控制
+
+---
+
+## 硬件规格
+
+| 项目          | 参数                          |
+| ------------- | ----------------------------- |
+| 主控芯片      | STM32F407VET6，168MHz         |
+| 数字输入      | 8 路全隔离 DI（X0-X7），DC24V，兼容 NPN/PNP |
+| 数字输出      | 10 路 DO（Y0-Y9），含 NPN 和继电器输出   |
+| 模拟输入      | 4 路 AI（0-5V），16位 ADS1115 ADC       |
+| RS485         | 1 路，支持 ModbusRTU + 传感器轮询       |
+| 以太网        | 1 路，支持 ModbusTCP（可选）             |
+| HMI 串口      | USART4（TTL→RS232→淘晶驰串口屏）         |
+| LoRa          | SX1262 模块，SPI2 接口（可选）           |
+| 供电          | DC 9-24V                                 |
+| 开发环境      | PlatformIO + Arduino 框架                |
+| 软件架构      | FreeRTOS，看门狗监控                      |
+
 ![接口](/Resource/Image/2.png)
 
-#### 程序流程
+---
 
-1.  串口重定向，因为在Arduino_STM32中，默认Serial是指向Serial2的，所以需要重定向到Serial。
-2.  显示系统信息。(在myShowMsg.h中，#define UseSerialPrint用于打印信息，默认关闭。)
-3.  加载相关参数。
-4.  GPIO初始化。
-5.  ModbusRTU协议初始化。
-6.  ModbusTCP协议初始化。
-7.  创建所有应用任务。
-    1. WatchdogTask:看门狗任务，用于监控系统是否正常运行。
-    2. X_filter：输入滤波任务，默认5ms。
-    3. ModbusRTUTask：处理ModbusRTU协议任务。
-    4. ModbusTCPTask：处理ModbusTCP协议任务。
-    5. MainTask：主任务，处理输入输出处理。
-8.  启动任务调度器。
+## 引脚分配
 
-#### 程序主要文件
+### 通信接口
 
-1.  Parameter_Config.h：参数配置文件。
-2.  IO_Setting.h：IO设置文件。
-3.  myModbus.h：Modbus相关函数。
-4.  myShowMsg.h：用于打印、显示信息。
-5.  myTask.h：任务相关函数。
-6.  main.cpp：程序入口文件。
+| 功能       | 引脚    | 说明                      |
+| ---------- | ------- | ------------------------- |
+| RS485      | PB10/PB11 | RX/TX，ModbusRTU + 传感器 |
+| RS485_EN   | PB1     | 方向控制                  |
+| 以太网     | SPI1    | W5500/W5100               |
+| HMI 串口   | PA0/PA1 | USART4 TX/RX → 串口屏     |
+| LoRa       | PB12-PB15, PC0, PD2 | SPI2, SX1262    |
+| 调试串口   | PD5/PD6 | UART2，115200 打印输出    |
 
+### 输入输出
 
-#### 程序使用
+| GPIO | 功能 | | GPIO | 功能 |
+|------|------|-|------|------|
+| PD10 | DI X0 | | PA15 | DO Y0 |
+| PD11 | DI X1 | | PB3  | DO Y1 |
+| PD12 | DI X2 | | PB4  | DO Y2（加湿器1）|
+| PD13 | DI X3 | | PB5  | DO Y3（加湿器2）|
+| PA8  | DI X4 | | PB6  | DO Y4（加湿器3）|
+| PB0  | DI X5 | | PB7  | DO Y5（加湿器4）|
+| PE6  | DI X6 | | PE10 | DO Y6（风机1）  |
+| PE4  | DI X7 | | PE11 | DO Y7（风机2）  |
+|      |       | | PE12 | DO Y8（风机3）  |
+|      |       | | PE13 | DO Y9（风机4）  |
 
-1.  打开PlatfromIO，编译程序。
-   ![编译下载选型](Resource/Image/DownloadOption.png)
-2.  下载程序到开发板。
-    1.  如果使用stlink下载程序,需要一个stlink下载器，某宝上一个十来块钱的就能买到，下载时可以不用切换下载模式，非常方便，配置文件中设置的默认下载方式是stlink,所以不需要额外设置。
-        ```C++
-        # 程序上传选项，通过stlink和串口二选一
-        #stlink上传选项
-        upload_protocol = stlink
+---
 
-        # 串口上传选项
-        #upload_port = COM13
-        #upload_protocol = serial
-        #upload_speed = 115200
-        ```
-    2.  使用串口下载程序，需要在PlatfromIO的设置中设置将下面两项开启，并注释掉stlink下载方式，注意下载时需要设置boot0引脚为1，再按复位键或者重新上电。
-_注意：在下载程序后记得将boot0引脚复位为0，否则重新上电时程序不会冲flash启动。_
-        ```C++
-        # 程序上传选项，通过stlink和串口二选一
-        #stlink上传选项
-        #upload_protocol = stlink
+## 程序结构
 
-        # 串口上传选项
-        upload_port = COM13
-        upload_protocol = serial
-        upload_speed = 115200     
-        ```
-1.  打开串口助手，查看相关信息。
-2.  连接输入输出端口，查看输入状态指示灯。
-3.  ModbusRTU客户端软件，连接开发板,端口号和波特率由拨码开关决定，拨码开关全部为0时，波特率为115200，站号为1。
-4.  ModbusTCP客户端软件，连接开发板，默认IP地址为192.168.1.168。
-5.  我使用的Modbus软件。
-    >链接：https://pan.baidu.com/s/1gVSAOsch675w53tLc9f6kw?pwd=um7m 
-    >提取码：um7m 
-    >复制这段内容后打开百度网盘手机App，操作更方便哦
-
-#### Modbus寄存器说明
-
-| Modbus地址 | 参数定义        | 默认值 | 单位 | 范围    | 读写 | 说明                                                                                                                                                                                                                                     |
-| ---------- | --------------- | ------ | ---- | ------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0          | 固件版本号      | 40408  | /    |         | R    | 固件版本号,一位年尾号+2位月份+2位日                                                                                                                                                                                                      |
-| 1          | 当前站号        |        | /    |         | R    | "全off为1，其他按位组合，修改后需重启生效<br>DIP3 DIP2 DIP1<br>000：1<br>001：1<br>010：2<br>依次类推,最大为111：7"                                                                                                                      |
-| 2          | 当前波特率      | bps    | R    |         |      | "全off位115200，，修改后需重启生效<br>DIP5 DIP4<br>00：115200<br>01：9600<br>10：19200<br>11：38400"                                                                                                                                     |
-| 3          | 参数保存        | 0      | /    |         | R/W  | "写入对应数值后，程序会自动清零<br>Save = 10,          // 将Modbus寄存器的值保存到EEPROM中<br>Reload = 20,        // 从EEPROM中加载Modbus寄存器的值<br>Reboot = 30,        // 重启设备<br>Factory_Reset = 66, // 恢复出厂设置并重启设备" |
-| 4          | 输入滤波时间    | 5      | ms   | 1-100   | R/W  | 输入端口的滤波时间                                                                                                                                                                                                                       |
-| 5          | MAC地址字节1和2 | 0XCDAB | /    |         | R/W  | 初始化时是以单片机ID自动生成                                                                                                                                                                                                             |
-| 6          | MAC地址字节3和4 | 0X12EF | /    |         | R/W  |                                                                                                                                                                                                                                          |
-| 7          | MAC地址字节5和6 | 0X5634 | /    |         | R/W  |                                                                                                                                                                                                                                          |
-| 8          | IP地址低16位    | 0X01A8 | /    |         | R/W  | "例如：192.168.1.168，修改IP地址后必须重启才会生效。<br>15：高字节01=1，低字节A8=168<br>16：高字节C0=192，低字节A8=168"                                                                                                                  |
-| 9          | IP地址高16位    | 0XC0A8 | /    |         | R/W  |                                                                                                                                                                                                                                          |
-| 10         | 设备运行时间    |        | 秒   | 0-65535 | R    | 设备运行时间，重复0-65535，可用于心跳检测                                                                                                                                                                                                |
-| 11         | 输入状态反馈    |        |      |         | R    | bit0-bit7分别对应X0-X7                                                                                                                                                                                                                   |
-| 12         | 输出状态反馈    |        |      |         | R/W  | bit0-bit5分别对应Y0-Y5                                                                                                                                                                                                                   |
-| 13         | 扩展输入状态反馈    |        |      |         | R | bit0-bit7分别对应X10-X17 bit8-bit15分别对应X20-X27                                                                                                                                                                                                                   |
-| 14         | 扩展输出状态反馈    |        |      |         | R/W | bit0-bit7分别对应Y10-Y17 bit8-bit15分别对应Y20-Y27                                                                                                                                                                                                                   |
-| 15         | AI0模拟量电压输入值    |        |      |         | R | AI0的模拟量电压输入转换的数字量，电压输入范围0-5V，精度0.01V,数字量经过转换公式（测量值\*0.0001818）后得到时实际输入电压值。例如数字值为27415，则输入电压为27415*0.0001818=4.98V。   注：如果读取值为32767，则表似乎模拟输入芯片部分未初始化完成，存在故障。                                                                                                                                                                                                                   |
-| 16         | AI1模拟量电压输入值    |        |      |         | R | 参考AI0计算                                                                                                                                                                                                                   |
-| 17         | AI2模拟量电压输入值    |        |      |         | R | 参考AI0计算                                                                                                                                                                                                                   |
-| 18         | AI3模拟量电压输入值    |        |      |         | R | 参考AI0计算                                                                                                                                                                                                                   |
-
-#### 其他说明
-
-1.  程序使用下面三个库。
 ```
-stm32duino/STM32duino FreeRTOS@^10.3.2
-epsilonrt/Modbus-Ethernet@^1.0.3
-epsilonrt/Modbus-Serial@^2.0.5
-```
-1.  为了使ModbusRTU和ModbusTCP共用数据区，所以需要将两个协议的数据指针指向相同的数据区，所以需要将Modbus类中的链表变量由私有变量更改为公共变量（默认已修改）。
+src/
+├── main.cpp              # 入口：系统初始化、创建任务、启动调度器
+├── globals.cpp           # 全局变量定义
+├── myTask.cpp            # 任务实现：看门狗、主任务、AD采集、任务创建
+├── myModbus.cpp          # ModbusRTU/TCP 协议栈
+├── mySensorTask.cpp      # 传感器状态机 + HMI串口屏通信
+├── myADS1115.cpp         # ADS1115 ADC 驱动
+├── myLoRaTask.cpp        # LoRa 收发任务（可选）
+├── myMQTT_TLS.cpp        # MQTT/TLS 客户端（可选）
+├── myNetworkConfig.cpp   # 以太网 DHCP/静态IP（可选）
+├── myK210.cpp            # K210 摄像头通信（可选）
+├── myESP32C6.cpp         # ESP32C6 SPI 协处理器（可选）
+├── IO_Setting.cpp        # GPIO 初始化与输入滤波
+└── Parameter_Config.cpp  # 参数存储（EEPROM）
 
-```c++
-//更改前
-private:
-TRegister *_regs_head;
-TRegisterTRegister *_regs_last;
-
-//更改后
-public:
-TRegister *_regs_head;
-TRegisterTRegister *_regs_last;
+include/
+├── IO_Setting.h          # 引脚定义
+├── Parameter_Config.h    # 参数配置结构体
+├── myModbus.h            # Modbus 接口
+├── mySensorTask.h        # 传感器与 HMI 协议常量
+├── myTask.h              # 任务声明
+├── myShowMsg.h           # 调试打印
+└── ...
 ```
 
-####  引用
-1.  [通过代码配置PlatformIO生成HEX文件。](https://blog.csdn.net/chang_jiang123/article/details/106215699)
+### FreeRTOS 任务列表
 
-#### 注意事项
-1.  程序供学习参考，若用于商业用途，请自行承担因使用本程序而产生的风险。
-2.  感谢您的关注！ 
+| 任务名称              | 优先级 | 功能                             |
+| --------------------- | ------ | -------------------------------- |
+| WatchdogTask          | 6      | 独立看门狗喂狗                   |
+| X_filter              | 5      | 数字输入滤波（默认 5ms）         |
+| ModbusRTUTask         | 5      | ModbusRTU 从站服务               |
+| IICTask               | 3      | ADS1115 ADC 周期性读取           |
+| MainTask              | 3      | 主循环：参数管理、IO 刷新        |
+| HMIReceiveTask        | 3      | 串口屏命令接收（逐字节解析）     |
+| SensorStateMachineTask| 2      | 传感器轮询状态机 + 数据发送至HMI |
+
+---
+
+## HMI 串口屏通信协议
+
+### STM32 → 串口屏（传感器数据）
+
+| 标志 | 数据类型 | 帧格式                    |
+| ---- | -------- | ------------------------- |
+| 0x03 | 温度     | `[0x03][值][0x03]`        |
+| 0x04 | 湿度     | `[0x04][值][0x04]`        |
+| 0x05 | CO2      | `[0x05][值][0x05]`        |
+| 0x06 | NH3      | `[0x06][值][0x06]`        |
+
+### 串口屏 → STM32（控制命令）
+
+| 命令头    | 帧长度 | 功能                             |
+| --------- | ------ | -------------------------------- |
+| 0x10~0x80 | 3 字节 | 8 路设备开关（加湿器1-4/风机1-4）|
+| 0x0A~0x0D | 3 字节 | 阈值设置 → Modbus Hreg 30-33     |
+| 0x0E,0x0F | 4 字节 | 参数控制                         |
+| 0x01      | 6 字节 | 16位数值参数                     |
+| 0x02      | 4 字节 | 参数组                           |
+
+> **VT 协议过滤**：淘晶驰内部协议帧头 `0xEE` 自动丢弃，不与自定义帧冲突。
+
+### 设备控制位映射
+
+| 设备码 | 输出位 | 引脚 | 对应设备 |
+| ------ | ------ | ----| -------- |
+| 0x10   | bit2   | PB4  | 加湿器 1 |
+| 0x20   | bit3   | PB5  | 加湿器 2 |
+| 0x30   | bit4   | PB6  | 加湿器 3 |
+| 0x40   | bit5   | PB7  | 加湿器 4 |
+| 0x50   | bit6   | PE10 | 风机 1   |
+| 0x60   | bit7   | PE11 | 风机 2   |
+| 0x70   | bit8   | PE12 | 风机 3   |
+| 0x80   | bit9   | PE13 | 风机 4   |
+
+---
+
+## Modbus 寄存器
+
+### 基本寄存器 (0-18)
+
+| 地址 | 名称             | 读写 | 说明                                         |
+| ---- | ---------------- | ---- | -------------------------------------------- |
+| 0    | 固件版本         | R    | 格式：年尾号+月+日，如 40501                 |
+| 1    | 当前站号         | R    | 由 DIP1-3 拨码决定，全 OFF=1                 |
+| 2    | 当前波特率       | R    | 由 DIP4-5 拨码决定，全 OFF=115200            |
+| 3    | 参数操作         | R/W  | 10=保存 20=加载 30=重启 66=恢复出厂          |
+| 4    | 输入滤波时间     | R/W  | 1-100 ms                                     |
+| 5-7  | MAC 地址         | R/W  | 上电时由 MCU ID 自动生成                     |
+| 8-9  | IP 地址          | R/W  | 默认 192.168.1.168，修改后需重启             |
+| 10   | 运行时间         | R    | 秒，0-65535 循环，可用于心跳检测             |
+| 11   | DI 输入状态      | R    | bit0-bit7 = X0-X7                            |
+| 12   | DO 输出状态      | R/W  | bit0-bit5 = Y0-Y5, bit6-bit9 = Y6-Y9         |
+| 13   | 扩展输入状态     | R    | bit0-7=X10-X17, bit8-15=X20-X27              |
+| 14   | 扩展输出状态     | R/W  | bit0-7=Y10-Y17, bit8-15=Y20-Y27              |
+| 15-18| AI0-AI3 模拟量   | R    | 数字值，换算：电压 = 值 × 0.0001818，32767 = 故障 |
+
+### 传感器寄存器 (25-33)
+
+| 地址 | 名称             | 读写 | 说明                                   |
+| ---- | ---------------- | ---- | -------------------------------------- |
+| 25   | 温度值           | R    | 放大 10 倍，如 256 = 25.6°C           |
+| 26   | 湿度值           | R    | 放大 10 倍，如 650 = 65.0%            |
+| 27   | CO2 浓度         | R    | 单位 ppm，原始值                       |
+| 28   | NH3 浓度         | R    | 放大 100 倍，如 123 = 1.23 ppm        |
+| 29   | 传感器状态       | R    | bit0=温湿度有效, bit1=CO2有效, bit2=NH3有效 |
+| 30-33| 阈值设置         | R/W  | 来自串口屏的阈值参数                   |
+
+---
+
+## 编译与下载
+
+### 环境要求
+
+- [PlatformIO IDE](https://platformio.org/)（VS Code 插件）
+- ST-Link 下载器（推荐）或 USB-TTL 串口模块
+
+### 编译
+
+```bash
+git clone git@github.com:AsaKing-gery/modbusstudy.git
+cd modbusstudy
+pio run
+```
+
+### 下载
+
+**ST-Link 方式**（默认，无需切换 BOOT0）：
+
+```ini
+upload_protocol = stlink
+```
+
+**串口方式**（需将 BOOT0 置 1 后复位）：
+
+```ini
+upload_port = COM13
+upload_protocol = serial
+upload_speed = 115200
+```
+
+> 下载完成后务必将 BOOT0 恢复为 0。
+
+### 串口监视
+
+```ini
+monitor_port = COM13
+monitor_speed = 115200
+```
+
+默认关闭调试打印。在 `myShowMsg.h` 中取消注释 `#define UseSerialPrint` 即可开启。
+
+---
+
+## 依赖库
+
+| 库名                              | 版本   | 用途               |
+| --------------------------------- | ------ | ------------------ |
+| stm32duino/STM32duino FreeRTOS    | ^10.3.2 | 实时操作系统     |
+| epsilonrt/Modbus-Serial           | ^2.0.5  | ModbusRTU 从站   |
+| epsilonrt/Modbus-Ethernet         | ^1.0.3  | ModbusTCP 从站   |
+| robtillaart/ADS1X15               | ^0.4.2  | ADS1115 ADC 驱动 |
+| jgromes/RadioLib                  | ^6.6.0  | SX1262 LoRa 驱动 |
+| arduino-libraries/ArduinoMqttClient | ^0.1.8 | MQTT 客户端     |
+| openslab-osu/SSLClient            | ^1.2.0  | TLS 加密通信     |
+| bblanchon/ArduinoJson             | ^7.0.4  | JSON 解析        |
+
+---
+
+## 注意事项
+
+1. 本程序供学习参考，若用于商业用途请自行承担风险。
+2. ModbusRTU 和 ModbusTCP 共用寄存器数据区，已修改 Modbus 库的链表变量为 public。
+3. ModbusTCP 需要将 `ModbusEthernet.h` 中的 `TCP_KEEP_ALIVE` 打开。
+4. 传感器任务和 ModbusRTU 任务共用 RS485 总线，通过互斥锁保护。
+5. HMI 串口屏波特率必须与 `SENSOR_BAUDRATE`（19200）一致。 
