@@ -106,23 +106,25 @@ void SendToHMI(uint8_t flag, float value, uint8_t decimalPlaces)
     char buf[32];
     if (decimalPlaces == 0)
     {
-        snprintf(buf, sizeof(buf), "%d\r\n", (int)value);
+        snprintf(buf, sizeof(buf), "%d", (int)value);
     }
     else if (decimalPlaces == 1)
     {
-        snprintf(buf, sizeof(buf), "%.1f\r\n", value);
+        snprintf(buf, sizeof(buf), "%.1f", value);
     }
     else if (decimalPlaces == 2)
     {
-        snprintf(buf, sizeof(buf), "%.2f\r\n", value);
+        snprintf(buf, sizeof(buf), "%.2f", value);
     }
     else
     {
-        snprintf(buf, sizeof(buf), "%.2f\r\n", value);
+        snprintf(buf, sizeof(buf), "%.2f", value);
     }
 
+    /* 帧格式: [flag][字符串数据][flag]，帧头==帧尾 */
     HMISerial.write(flag);
     HMISerial.print(buf);
+    HMISerial.write(flag);
     HMISerial.flush();
 }
 
@@ -147,78 +149,55 @@ void SensorSerial_Init()
     ShowMsg("Sensor Serial initialized", true);
 }
 
-void ProcessFanControl(uint8_t cmd)
+void ProcessDeviceControl(uint8_t head, uint8_t value)
 {
-    uint32_t fanPin = 0;
-    bool turnOn = false;
-
-    switch (cmd)
-    {
-    case FAN1_OPEN:  fanPin = FAN1_PIN; turnOn = true;  break;
-    case FAN2_OPEN:  fanPin = FAN2_PIN; turnOn = true;  break;
-    case FAN3_OPEN:  fanPin = FAN3_PIN; turnOn = true;  break;
-    case FAN4_OPEN:  fanPin = FAN4_PIN; turnOn = true;  break;
-    case FAN1_CLOSE: fanPin = FAN1_PIN; turnOn = false; break;
-    case FAN2_CLOSE: fanPin = FAN2_PIN; turnOn = false; break;
-    case FAN3_CLOSE: fanPin = FAN3_PIN; turnOn = false; break;
-    case FAN4_CLOSE: fanPin = FAN4_PIN; turnOn = false; break;
-    default:
-        ShowMsg("Unknown fan cmd:" + String(cmd, HEX), true);
+    uint8_t bitIndex = getDeviceBitFromHead(head);
+    if (bitIndex < 2 || bitIndex > 9) {
+        ShowMsg("[HMI] Invalid device head: 0x" + String(head, HEX), true);
         return;
     }
 
     uint16_t outputState = myModbusRTU.hreg(12);
-    uint16_t bitMask = 0;
-    if (fanPin == FAN1_PIN) bitMask = 0x40;
-    else if (fanPin == FAN2_PIN) bitMask = 0x80;
-    else if (fanPin == FAN3_PIN) bitMask = 0x100;
-    else if (fanPin == FAN4_PIN) bitMask = 0x200;
+    uint16_t bitMask = (1 << bitIndex);
 
-    if (turnOn)
+    if (value != 0)
         outputState |= bitMask;
     else
         outputState &= ~bitMask;
 
     myModbusRTU.setHreg(12, outputState);
 
-    ShowMsg("Fan cmd:" + String(cmd, HEX) + " pin:" + String(fanPin) + " " + (turnOn ? "ON" : "OFF"), true);
+    ShowMsg("[HMI] Device 0x" + String(head, HEX) + " bit" + String(bitIndex)
+            + " " + (value ? "ON" : "OFF"), true);
 }
 
-void ProcessHumiControl(uint8_t cmd)
+/**
+ * @brief 判断字节是否为有效命令头
+ * @note 有效命令头: 0x01, 0x02, 0x0A~0x0D, 0x0E, 0x0F, 0x10~0x80
+ *       VT内部协议帧头 0xEE 和传感器数据标志 0x03~0x06 需要过滤
+ */
+static bool isValidCommandHead(uint8_t byte)
 {
-    uint32_t humiPin = 0;
-    bool turnOn = false;
+    // 数值参数或参数组
+    if (byte == 0x01 || byte == 0x02) return true;
+    // 阈值设置
+    if (byte >= 0x0A && byte <= 0x0D) return true;
+    // 参数控制
+    if (byte == 0x0E || byte == 0x0F) return true;
+    // 设备控制 (0x10, 0x20, 0x30, ..., 0x80)
+    if (byte >= 0x10 && byte <= 0x80 && (byte & 0x0F) == 0) return true;
+    return false;
+}
 
-    switch (cmd)
-    {
-    case HUMI1_OPEN:  humiPin = HUMI1_PIN; turnOn = true;  break;
-    case HUMI2_OPEN:  humiPin = HUMI2_PIN; turnOn = true;  break;
-    case HUMI3_OPEN:  humiPin = HUMI3_PIN; turnOn = true;  break;
-    case HUMI4_OPEN:  humiPin = HUMI4_PIN; turnOn = true;  break;
-    case HUMI1_CLOSE: humiPin = HUMI1_PIN; turnOn = false; break;
-    case HUMI2_CLOSE: humiPin = HUMI2_PIN; turnOn = false; break;
-    case HUMI3_CLOSE: humiPin = HUMI3_PIN; turnOn = false; break;
-    case HUMI4_CLOSE: humiPin = HUMI4_PIN; turnOn = false; break;
-    default:
-        ShowMsg("Unknown humi cmd:" + String(cmd, HEX), true);
-        return;
-    }
-
-    uint16_t outputState = myModbusRTU.hreg(12);
-    uint16_t bitMask = 0;
-    if (humiPin == HUMI1_PIN) bitMask = 0x04;
-    else if (humiPin == HUMI2_PIN) bitMask = 0x08;
-    else if (humiPin == HUMI3_PIN) bitMask = 0x10;
-    else if (humiPin == HUMI4_PIN) bitMask = 0x20;
-
-    if (turnOn)
-        outputState |= bitMask;
-    else
-        outputState &= ~bitMask;
-
-    myModbusRTU.setHreg(12, outputState);
-
-    ShowMsg("Humi cmd:" + String(cmd, HEX) + " pin:" + String(humiPin) + " " + (turnOn ? "ON" : "OFF"), true);
+/**
+ * @brief 根据命令头获取期望帧长度
+ */
+static uint8_t getExpectedFrameLen(uint8_t head)
+{
+    if (head == 0x01) return 6;                               // 数值参数
+    if (head == 0x02 || head == 0x0E || head == 0x0F) return 4; // 参数组/控制
+    // 阈值 0x0A~0x0D 和设备控制 0x10~0x80 都是3字节
+    return 3;
 }
 
 void HMIReceiveTask(void *pvParameters)
@@ -226,45 +205,87 @@ void HMIReceiveTask(void *pvParameters)
     vTaskDelay(pdMS_TO_TICKS(800));
     ShowMsg("HMI Receive task started", true);
 
-    uint8_t hmiRxBuffer[8];
-    uint8_t hmiRxIndex = 0;
-    uint32_t hmiLastByteTime = 0;
+    uint8_t rxBuffer[8];
+    uint8_t rxIdx = 0;
 
     while (true)
     {
         while (HMISerial.available() > 0)
         {
-            if (hmiRxIndex < sizeof(hmiRxBuffer))
+            uint8_t byte = HMISerial.read();
+
+            // 诊断打印（每字节）
+            // ShowMsg("[HMI] RX byte: 0x" + String(byte, HEX), true);
+
+            if (rxIdx == 0)
             {
-                hmiRxBuffer[hmiRxIndex++] = HMISerial.read();
-                hmiLastByteTime = millis();
+                // 首字节过滤：只接受有效命令头，跳过VT协议数据和传感器回显
+                if (isValidCommandHead(byte))
+                {
+                    rxBuffer[0] = byte;
+                    rxIdx = 1;
+                }
+                // 否则丢弃该字节
             }
             else
             {
-                HMISerial.read(); // 缓冲区满，丢弃
-            }
-        }
+                rxBuffer[rxIdx++] = byte;
+                uint8_t expectedLen = getExpectedFrameLen(rxBuffer[0]);
 
-        if (hmiRxIndex >= 2 && (millis() - hmiLastByteTime) >= 5)
-        {
-            uint8_t flag = hmiRxBuffer[0];
-            uint8_t cmd  = hmiRxBuffer[1];
+                if (rxIdx == expectedLen)
+                {
+                    // 校验帧头==帧尾
+                    if (rxBuffer[0] == rxBuffer[expectedLen - 1])
+                    {
+                        uint8_t head = rxBuffer[0];
 
-            if (flag == HMI_FLAG_FAN_CTRL)
-            {
-                ProcessFanControl(cmd);
+                        // --- 设备控制: 0x10~0x80 (3字节) ---
+                        if (head >= HMI_CMD_DEV_BASE && head <= HMI_CMD_DEV_END && (head & 0x0F) == 0)
+                        {
+                            ProcessDeviceControl(head, rxBuffer[1]);
+                        }
+                        // --- 阈值设置: 0x0A~0x0D (3字节) ---
+                        else if (head >= HMI_CMD_THRESHOLD_A && head <= HMI_CMD_THRESHOLD_D)
+                        {
+                            // 阈值值在 rxBuffer[1]，为文本字符
+                            uint16_t hregAddr = 30 + (head - HMI_CMD_THRESHOLD_A);
+                            uint16_t thresholdVal = (uint16_t)(rxBuffer[1]);
+                            myModbusRTU.setHreg(hregAddr, thresholdVal);
+                            ShowMsg("[HMI] Threshold 0x" + String(head, HEX)
+                                    + " → Hreg" + String(hregAddr)
+                                    + " = " + String(thresholdVal), true);
+                        }
+                        // --- 参数控制: 0x0E/0x0F (4字节) ---
+                        else if (head == HMI_CMD_PARAM_E)
+                        {
+                            // rxBuffer[1]=val1, rxBuffer[2]=val2
+                            ShowMsg("[HMI] Param E: " + String(rxBuffer[1]) + ", " + String(rxBuffer[2]), true);
+                        }
+                        else if (head == HMI_CMD_PARAM_F)
+                        {
+                            ShowMsg("[HMI] Param F: " + String(rxBuffer[1]) + ", " + String(rxBuffer[2]), true);
+                        }
+                        // --- 数值参数: 0x01 (6字节) ---
+                        else if (head == HMI_CMD_NUMERIC)
+                        {
+                            uint16_t co1 = ((uint16_t)rxBuffer[1] << 8) | rxBuffer[2];
+                            uint16_t co2 = ((uint16_t)rxBuffer[3] << 8) | rxBuffer[4];
+                            ShowMsg("[HMI] Numeric: co1=" + String(co1) + " co2=" + String(co2), true);
+                        }
+                        // --- 参数组: 0x02 (4字节) ---
+                        else if (head == HMI_CMD_PARAM_GROUP)
+                        {
+                            ShowMsg("[HMI] Param Group: " + String(rxBuffer[1]) + ", " + String(rxBuffer[2]), true);
+                        }
+                    }
+                    else
+                    {
+                        ShowMsg("[HMI] Frame mismatch: head=0x" + String(rxBuffer[0], HEX)
+                                + " tail=0x" + String(rxBuffer[expectedLen - 1], HEX), true);
+                    }
+                    rxIdx = 0;  // 处理完毕，重置索引
+                }
             }
-            else if (flag == HMI_FLAG_HUMI_CTRL)
-            {
-                ProcessHumiControl(cmd);
-            }
-            else
-            {
-                ShowMsg("Unknown HMI flag: 0x" + String(flag, HEX), true);
-            }
-
-            // 处理完后清空缓冲区
-            hmiRxIndex = 0;
         }
 
         vTaskDelay(pdMS_TO_TICKS(5));
