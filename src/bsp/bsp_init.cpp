@@ -50,9 +50,9 @@ void bsp_gpio_init(void)
 
     /* --- 运行指示灯 --- */
     pinMode(PIN_RUN_LED, OUTPUT);
-    digitalWrite(PIN_RUN_LED, LOW);
+    digitalWrite(PIN_RUN_LED, !LED_ACTIVE);
     pinMode(PIN_ERROR_LED, OUTPUT);
-    digitalWrite(PIN_ERROR_LED, LOW);
+    digitalWrite(PIN_ERROR_LED, !LED_ACTIVE);
     TRACE("G1");
 
     /* --- 8路继电器，全部断开 --- */

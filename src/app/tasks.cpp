@@ -56,7 +56,6 @@ static void task_main(void *pvParameters)
     DBG("MAIN", "started");
 
     uint32_t last_tick = 0;
-    bool led_state = false;
 
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -64,8 +63,7 @@ static void task_main(void *pvParameters)
         /* 1Hz LED 闪烁 + 运行时间 */
         if (millis() - last_tick >= 1000) {
             last_tick = millis();
-            led_state = !led_state;
-            digitalWrite(PIN_RUN_LED, led_state ? HIGH : LOW);
+            led_run_toggle();
             modbus_reg_set(REG_UPTIME, last_tick / 1000);
         }
     }
