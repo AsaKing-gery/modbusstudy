@@ -65,6 +65,8 @@ struct TRegister {
 class Modbus {
     #ifndef __DOXYGEN__
   private:
+    TRegister *_regs_head;
+    TRegister *_regs_last;
     char *_additional_data;
 
     void readRegisters (const byte fcode, const word startreg, const word numregs);
@@ -106,8 +108,6 @@ class Modbus {
     #endif
 
   public:
-    TRegister *_regs_head;
-    TRegister *_regs_last;
     /**
       @brief Default constructor
     */

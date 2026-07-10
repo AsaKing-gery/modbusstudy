@@ -78,25 +78,25 @@ extern volatile bool mqttConnected;
 /* 互斥锁 - 保护MQTT操作 */
 extern SemaphoreHandle_t xMQTTMutex;
 
-/* 风机和加湿器引脚定义 - 与mySensorTask.h保持一致 */
-#define FAN1_PIN Output_Y6 // 风机1 -> Y6
-#define FAN2_PIN Output_Y7 // 风机2 -> Y7
-#define FAN3_PIN Output_Y8 // 风机3 -> Y8
-#define FAN4_PIN Output_Y9 // 风机4 -> Y9
-#define HUMI1_PIN Output_Y2 // 加湿器1 -> Y2
-#define HUMI2_PIN Output_Y3 // 加湿器2 -> Y3
-#define HUMI3_PIN Output_Y4 // 加湿器3 -> Y4
-#define HUMI4_PIN Output_Y5 // 加湿器4 -> Y5
+/* 风机和加湿器引脚定义 - 与mySensorTask.h保持一致 (Y1~Y4加湿器, Y5~Y8风机) */
+#define FAN1_PIN Output_Y5 // 风机1 -> Y5(PE11)
+#define FAN2_PIN Output_Y6 // 风机2 -> Y6(PE12)
+#define FAN3_PIN Output_Y7 // 风机3 -> Y7(PE13)
+#define FAN4_PIN Output_Y8 // 风机4 -> Y8(PE14)
+#define HUMI1_PIN Output_Y1 // 加湿器1 -> Y1(PE7)
+#define HUMI2_PIN Output_Y2 // 加湿器2 -> Y2(PE8)
+#define HUMI3_PIN Output_Y3 // 加湿器3 -> Y3(PE9)
+#define HUMI4_PIN Output_Y4 // 加湿器4 -> Y4(PE10)
 
 /* 风机和加湿器对应的Modbus寄存器位掩码 - 与mySensorTask.h保持一致 */
-#define FAN1_BITMASK 0x40
-#define FAN2_BITMASK 0x80
-#define FAN3_BITMASK 0x100
-#define FAN4_BITMASK 0x200
-#define HUMI1_BITMASK 0x04
-#define HUMI2_BITMASK 0x08
-#define HUMI3_BITMASK 0x10
-#define HUMI4_BITMASK 0x20
+#define FAN1_BITMASK 0x10
+#define FAN2_BITMASK 0x20
+#define FAN3_BITMASK 0x40
+#define FAN4_BITMASK 0x80
+#define HUMI1_BITMASK 0x01
+#define HUMI2_BITMASK 0x02
+#define HUMI3_BITMASK 0x04
+#define HUMI4_BITMASK 0x08
 
 /* 设备状态变量和互斥锁 - 定义在myDeviceState.h中，被多个模块共享 */
 #include "myDeviceState.h"

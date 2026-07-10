@@ -86,7 +86,7 @@ void Load_ParameterTORegister(void)
 {
     myModbusRTU.setHreg(0, Version);
     myModbusRTU.setHreg(1, myPar.SlaveId);
-    myModbusRTU.setHreg(2, baudRateSwitchState);
+    myModbusRTU.setHreg(2, myPar.Baudrate);
     myModbusRTU.setHreg(4, myPar.Input_Filter_Time);
     myModbusRTU.setHreg(5, (myPar.mac[1] << 8) + myPar.mac[0]);
     myModbusRTU.setHreg(6, (myPar.mac[3] << 8) + myPar.mac[2]);
@@ -117,7 +117,6 @@ void MainTask(void *pvParameters)
     vTaskDelay(pdMS_TO_TICKS(500));
     ShowMsg("Main task started", true);
     uint32_t timeRecord = 0;
-    uint16_t Input_Temp = 0;
     uint16_t Output_Temp = 0;
     uint16_t Param_Temp = 0;
     bool runLedTemp = false;
@@ -161,36 +160,26 @@ void MainTask(void *pvParameters)
             Param_Temp = 0;
         }
 
-        SET_BIT_BY_BOOL(Input_Temp, 0, Input.X0);
-        SET_BIT_BY_BOOL(Input_Temp, 1, Input.X1);
-        SET_BIT_BY_BOOL(Input_Temp, 2, Input.X2);
-        SET_BIT_BY_BOOL(Input_Temp, 3, Input.X3);
-        SET_BIT_BY_BOOL(Input_Temp, 4, Input.X4);
-        SET_BIT_BY_BOOL(Input_Temp, 5, Input.X5);
-        SET_BIT_BY_BOOL(Input_Temp, 6, Input.X6);
-        SET_BIT_BY_BOOL(Input_Temp, 7, Input.X7);
-        myModbusRTU.setHreg(11, Input_Temp);
+        // 删除数字输入，Hreg(11)恒为0
+        myModbusRTU.setHreg(11, 0);
 
         if (myModbusRTU.hreg(12) != Output_Temp)
         {
             Output_Temp = myModbusRTU.hreg(12);
-            digitalWrite(Output_Y0, (Output_Temp & 0x01) > 0 ? LOW : HIGH);
-            digitalWrite(Output_Y1, (Output_Temp & 0x02) > 0 ? LOW : HIGH);
-            digitalWrite(Output_Y2, (Output_Temp & 0x04) > 0 ? LOW : HIGH);
-            digitalWrite(Output_Y3, (Output_Temp & 0x08) > 0 ? LOW : HIGH);
-            digitalWrite(Output_Y4, (Output_Temp & 0x10) > 0 ? LOW : HIGH);
-            digitalWrite(Output_Y5, (Output_Temp & 0x20) > 0 ? LOW : HIGH);
-            digitalWrite(Output_Y6, (Output_Temp & 0x40) > 0 ? LOW : HIGH);
-            digitalWrite(Output_Y7, (Output_Temp & 0x80) > 0 ? LOW : HIGH);
-            digitalWrite(Output_Y8, (Output_Temp & 0x100) > 0 ? LOW : HIGH);
-            digitalWrite(Output_Y9, (Output_Temp & 0x200) > 0 ? LOW : HIGH);
+            digitalWrite(Output_Y1, (Output_Temp & 0x01) > 0 ? LOW : HIGH);
+            digitalWrite(Output_Y2, (Output_Temp & 0x02) > 0 ? LOW : HIGH);
+            digitalWrite(Output_Y3, (Output_Temp & 0x04) > 0 ? LOW : HIGH);
+            digitalWrite(Output_Y4, (Output_Temp & 0x08) > 0 ? LOW : HIGH);
+            digitalWrite(Output_Y5, (Output_Temp & 0x10) > 0 ? LOW : HIGH);
+            digitalWrite(Output_Y6, (Output_Temp & 0x20) > 0 ? LOW : HIGH);
+            digitalWrite(Output_Y7, (Output_Temp & 0x40) > 0 ? LOW : HIGH);
+            digitalWrite(Output_Y8, (Output_Temp & 0x80) > 0 ? LOW : HIGH);
         }
 
         if (millis() - timeRecord > 1000)
         {
             timeRecord = millis();
             digitalWrite(RUN_LED, runLedTemp = !runLedTemp);
-            digitalWrite(BOARD_LED, runLedTemp); // 板载运行指示灯PB2，高电平点亮
             myModbusRTU.setHreg(10, timeRecord / 1000);
         }
     }
@@ -200,9 +189,6 @@ void CreateTaskMethods(void *pvParameters)
 {
     xTaskCreate(WatchdogTask, "WatchdogTask", 96, NULL, 6, NULL);
     ShowMsg("Watchdog task created.", true);
-
-    xTaskCreate(X_filter, "X_filter", 96, NULL, 5, NULL);
-    ShowMsg("Input filter task created.", true);
 
     xTaskCreate(ModbusRTUTask, "ModbusRTUSevice", 128, NULL, 5, NULL);
     ShowMsg("ModbusRTU task created.", true);

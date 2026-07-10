@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
+#include <SoftwareSerial.h>
 #include "IO_Setting.h"
 #include "myShowMsg.h"
 #include "myModbus.h"
@@ -10,9 +11,9 @@
 /* 使用板子原有的RS485串口 - 与ModbusRTU共用mbSerial (PB10/PB11) 和 PB1方向控制 */
 #define SENSOR_RS485_EN mbSendEnPin // RS485方向控制引脚，使用原有定义
 
-/* 串口屏USART4引脚已在IO_Setting.h中定义 */
-// #define HMI_USART_RX PA1 // USART4 RX
-// #define HMI_USART_TX PA0 // USART4 TX
+/* 串口屏UART7引脚已在IO_Setting.h中定义 */
+// #define HMI_USART_RX PC10 // UART7 RX
+// #define HMI_USART_TX PA15 // UART7 TX
 
 /* 传感器Modbus参数 */
 #define SENSOR_SLAVE_ID     0x01
@@ -80,37 +81,37 @@
 
 /* ==================== 设备控制引脚映射 ==================== */
 /*
- * 设备码 → 输出引脚 → Modbus Hreg(12)位映射:
- *   0x10: 加湿器1 → Y2(PB4) → bit2
- *   0x20: 加湿器2 → Y3(PB5) → bit3
- *   0x30: 加湿器3 → Y4(PB6) → bit4
- *   0x40: 加湿器4 → Y5(PB7) → bit5
- *   0x50: 风机1   → Y6(PE10) → bit6
- *   0x60: 风机2   → Y7(PE11) → bit7
- *   0x70: 风机3   → Y8(PE12) → bit8
- *   0x80: 风机4   → Y9(PE13) → bit9
- * Y0(PA15)和Y1(PB3)预留，8路控制从bit2开始
+ * 8路继电器 (PE7~PE14)，设备码 → 输出引脚 → Modbus Hreg(12)位映射:
+ *   Y1~Y4=加湿器, Y5~Y8=风机
+ *   0x10: 加湿器1 → Y1(PE7)  → bit0
+ *   0x20: 加湿器2 → Y2(PE8)  → bit1
+ *   0x30: 加湿器3 → Y3(PE9)  → bit2
+ *   0x40: 加湿器4 → Y4(PE10) → bit3
+ *   0x50: 风机1   → Y5(PE11) → bit4
+ *   0x60: 风机2   → Y6(PE12) → bit5
+ *   0x70: 风机3   → Y7(PE13) → bit6
+ *   0x80: 风机4   → Y8(PE14) → bit7
  */
 // 根据设备命令头获取对应的Modbus输出寄存器bit位
 inline uint8_t getDeviceBitFromHead(uint8_t head) {
     if (head >= 0x10 && head <= 0x80) {
-        // 0x10→bit2, 0x20→bit3, 0x30→bit4, ..., 0x80→bit9
-        return ((head >> 4) & 0x0F) + 1;
+        // 0x10→bit0, 0x20→bit1, ..., 0x80→bit7
+        return ((head >> 4) & 0x0F) - 1;
     }
     return 0;
 }
 
-/* 风机对应输出引脚 */
-#define FAN1_PIN Output_Y6 // 风机1 -> Y6
-#define FAN2_PIN Output_Y7 // 风机2 -> Y7
-#define FAN3_PIN Output_Y8 // 风机3 -> Y8
-#define FAN4_PIN Output_Y9 // 风机4 -> Y9
+/* 风机对应输出引脚 (Y5~Y8: PE11~PE14) */
+#define FAN1_PIN Output_Y5 // 风机1 -> Y5(PE11)
+#define FAN2_PIN Output_Y6 // 风机2 -> Y6(PE12)
+#define FAN3_PIN Output_Y7 // 风机3 -> Y7(PE13)
+#define FAN4_PIN Output_Y8 // 风机4 -> Y8(PE14)
 
-/* 加湿器对应输出引脚 */
-#define HUMI1_PIN Output_Y2 // 加湿器1 -> Y2
-#define HUMI2_PIN Output_Y3 // 加湿器2 -> Y3
-#define HUMI3_PIN Output_Y4 // 加湿器3 -> Y4
-#define HUMI4_PIN Output_Y5 // 加湿器4 -> Y5
+/* 加湿器对应输出引脚 (Y1~Y4: PE7~PE10) */
+#define HUMI1_PIN Output_Y1 // 加湿器1 -> Y1(PE7)
+#define HUMI2_PIN Output_Y2 // 加湿器2 -> Y2(PE8)
+#define HUMI3_PIN Output_Y3 // 加湿器3 -> Y3(PE9)
+#define HUMI4_PIN Output_Y4 // 加湿器4 -> Y4(PE10)
 
 /* 传感器轮询周期 - 5秒 */
 #define SENSOR_POLL_INTERVAL_MS 5000
@@ -124,7 +125,7 @@ extern SemaphoreHandle_t xSensorMutex;
 /* 传感器串口使用板子原有的mbSerial (PB10/PB11)，不再新建HardwareSerial实例 */
 
 /* 串口屏串口实例 */
-extern HardwareSerial HMISerial;
+extern SoftwareSerial HMISerial;
 
 /* 函数声明 */
 uint16_t ModbusCRC16(uint8_t *data, uint8_t length);

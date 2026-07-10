@@ -130,29 +130,21 @@ void SendToHMI(uint8_t flag, float value, uint8_t decimalPlaces)
 
 void SensorSerial_Init()
 {
-    ShowMsg("Sensor Serial initializing", true);
-
-    HMISerial.setRx(HMI_USART_RX);
-    HMISerial.setTx(HMI_USART_TX);
-    HMISerial.begin(SENSOR_BAUDRATE, SERIAL_8N1);
-
+    Serial.println("S"); Serial.flush();
+    HMISerial.begin(SENSOR_BAUDRATE);
     xSensorMutex = xSemaphoreCreateMutex();
-    if (xSensorMutex == NULL)
-    {
-        ShowMsg("Sensor Mutex create failed!", true);
+    if (xSensorMutex == NULL) {
+        Serial.println("!"); Serial.flush();
+    } else {
+        Serial.println("."); Serial.flush();
     }
-    else
-    {
-        ShowMsg("Sensor Mutex create OK", true);
-    }
-
-    ShowMsg("Sensor Serial initialized", true);
+    Serial.println("s"); Serial.flush();
 }
 
 void ProcessDeviceControl(uint8_t head, uint8_t value)
 {
     uint8_t bitIndex = getDeviceBitFromHead(head);
-    if (bitIndex < 2 || bitIndex > 9) {
+    if (bitIndex > 7) {
         ShowMsg("[HMI] Invalid device head: 0x" + String(head, HEX), true);
         return;
     }
@@ -203,10 +195,11 @@ static uint8_t getExpectedFrameLen(uint8_t head)
 void HMIReceiveTask(void *pvParameters)
 {
     vTaskDelay(pdMS_TO_TICKS(800));
-    ShowMsg("HMI Receive task started", true);
+    ShowMsg("hT", true);  // HMI task started
 
     uint8_t rxBuffer[8];
     uint8_t rxIdx = 0;
+    uint32_t lastAlivePrint = 0;
 
     while (true)
     {
@@ -215,7 +208,7 @@ void HMIReceiveTask(void *pvParameters)
             uint8_t byte = HMISerial.read();
 
             // 诊断打印（每字节）
-            // ShowMsg("[HMI] RX byte: 0x" + String(byte, HEX), true);
+            ShowMsg("[HMI] RX byte: 0x" + String(byte, HEX), true);
 
             if (rxIdx == 0)
             {
@@ -289,13 +282,20 @@ void HMIReceiveTask(void *pvParameters)
         }
 
         vTaskDelay(pdMS_TO_TICKS(5));
+
+        // 每3秒打印一次心跳，确认任务存活
+        if (millis() - lastAlivePrint > 3000)
+        {
+            lastAlivePrint = millis();
+            ShowMsg("[HMI] task alive, HMISerial.available=" + String(HMISerial.available()), true);
+        }
     }
 }
 
 void SensorStateMachineTask(void *pvParameters)
 {
     vTaskDelay(pdMS_TO_TICKS(500));
-    ShowMsg("SensorStateMachine task started", true);
+    ShowMsg("sT", true);  // Sensor task started
 
     uint8_t txFrame[8];
     uint8_t rxBuffer[16];

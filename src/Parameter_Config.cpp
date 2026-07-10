@@ -11,16 +11,14 @@ uint32_t GetMCUId(uint8_t offsetIndex)
 
 void Save_Parameter()
 {
-    uint32_t recordTime = millis();
-    ShowMsg("Saving parameter", true);
-    EEPROM.put(0, myPar);
-    ShowMsg("Parameter Saved:" + String(millis() - recordTime), true);
+    // EEPROM emulation on STM32F4 is unstable; skip for now.
+    // When needed, use FlashStorage library instead.
+    ShowMsg("Save parameter skipped (EEPROM disabled)", true);
 }
 
 void Parameter_Init()
 {
-    ShowMsg("Initializing parameter", true);
-    myPar = Parameter_Config();
+    // Silent init - no prints to avoid Serial buffer issues
     uint32_t id1 = GetMCUId();
     uint32_t id2 = GetMCUId(1);
     myPar.mac[0] = id1 & 0xFF;
@@ -29,17 +27,11 @@ void Parameter_Init()
     myPar.mac[3] = (id1 >> 24) & 0xFF;
     myPar.mac[4] = id2 & 0xFF;
     myPar.mac[5] = (id2 >> 8) & 0xFF;
-    Save_Parameter();
 }
 
 void Load_Parameter()
 {
-    uint32_t recordTime = millis();
-    ShowMsg("Loading parameter", true);
-    EEPROM.get(0, myPar);
-    if (myPar.InitFlag != 66)
-    {
-        Parameter_Init();
-    }
-    ShowMsg("Parameter loaded：" + String(millis() - recordTime), true);
+    Serial.println("L"); Serial.flush();
+    Parameter_Init();
+    Serial.println("P"); Serial.flush();
 }

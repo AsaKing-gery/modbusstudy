@@ -12,70 +12,30 @@ void pinMode_OutSetting(uint32_t ulPin)
 
 void GPIO_Init()
 {
-    ShowMsg("GPIO_Initizing", true);
-    pinMode(SW_B1, INPUT_PULLUP);
-    pinMode(SW_B2, INPUT_PULLUP);
-    pinMode(SW_B3, INPUT_PULLUP);
-    pinMode(SW_B4, INPUT_PULLUP);
-    pinMode(SW_B5, INPUT_PULLUP);
-    pinMode(Temp_X0, INPUT);
-    pinMode(Temp_X1, INPUT);
-    pinMode(Temp_X2, INPUT);
-    pinMode(Temp_X3, INPUT);
-    pinMode(Temp_X4, INPUT);
-    pinMode(Temp_X5, INPUT);
-    pinMode(Temp_X6, INPUT);
-    pinMode(Temp_X7, INPUT);
-    pinMode_OutSetting(Output_Y0);
+    Serial.println("G"); Serial.flush();
     pinMode_OutSetting(Output_Y1);
+    Serial.println("G1"); Serial.flush();
     pinMode_OutSetting(Output_Y2);
     pinMode_OutSetting(Output_Y3);
     pinMode_OutSetting(Output_Y4);
+    Serial.println("G2"); Serial.flush();
     pinMode_OutSetting(Output_Y5);
     pinMode_OutSetting(Output_Y6);
     pinMode_OutSetting(Output_Y7);
     pinMode_OutSetting(Output_Y8);
-    pinMode_OutSetting(Output_Y9);
+    Serial.println("G3"); Serial.flush();
     pinMode_OutSetting(ERROR_LED);
     pinMode_OutSetting(RUN_LED);
-    pinMode(BOARD_LED, OUTPUT);
-    digitalWrite(BOARD_LED, LOW);
+    Serial.println("G4"); Serial.flush();
     pinMode(HMI_USART_RX, INPUT);
     pinMode(HMI_USART_TX, OUTPUT);
     digitalWrite(HMI_USART_TX, HIGH);
-    pinMode(RA01S_RESET, OUTPUT);
-    digitalWrite(RA01S_RESET, HIGH);
-    pinMode(RA01S_DIO1, INPUT_PULLUP);
-    pinMode(RA01S_SPI_NSS, OUTPUT);
-    digitalWrite(RA01S_SPI_NSS, HIGH);
-    pinMode(RA01S_BUSY, INPUT);
-    RA01S_SPI.begin();
-    pinMode(K210_USART_RX, INPUT_PULLUP);
-    pinMode(K210_USART_TX, OUTPUT);
-    digitalWrite(K210_USART_TX, HIGH);
-    idSwitchState = (!digitalRead(SW_B3) << 2) | (!digitalRead(SW_B2) << 1) | !digitalRead(SW_B1);
-    baudRateSwitchState = (!digitalRead(SW_B5) << 1) | !digitalRead(SW_B4);
-    myPar.SlaveId = (idSwitchState == 0 ? 1 : idSwitchState);
-    switch (baudRateSwitchState)
-    {
-    case 0:
-        myPar.Baudrate = 115200;
-        break;
-    case 1:
-        myPar.Baudrate = 9600;
-        break;
-    case 2:
-        myPar.Baudrate = 19200;
-        break;
-    case 3:
-        myPar.Baudrate = 38400;
-        break;
-    default:
-        myPar.Baudrate = 115200;
-        break;
-    }
+    Serial.println("G5"); Serial.flush();
+    // K210 暂不使用，跳过引脚初始化 (PD5/PD6为调试串口)
+    Serial.println("G6"); Serial.flush();
 
-    /* 上电初始化：Y2-Y9 继电器全部断开 */
+    /* 上电初始化：8路继电器全部断开 */
+    digitalWrite(Output_Y1, HIGH);
     digitalWrite(Output_Y2, HIGH);
     digitalWrite(Output_Y3, HIGH);
     digitalWrite(Output_Y4, HIGH);
@@ -83,31 +43,7 @@ void GPIO_Init()
     digitalWrite(Output_Y6, HIGH);
     digitalWrite(Output_Y7, HIGH);
     digitalWrite(Output_Y8, HIGH);
-    digitalWrite(Output_Y9, HIGH);
+    Serial.println("G7"); Serial.flush();
 
-    ShowMsg("GPIO_Initized", true);
-}
-
-void X_filter(void *pvParameters)
-{
-    vTaskDelay(pdMS_TO_TICKS(100));
-    ShowMsg("X_filter task started", true);
-    static uint8_t x_buffer[8];
-    static uint32_t timeRecord = 0;
-    while (true)
-    {
-        vTaskDelay(pdMS_TO_TICKS(1));
-        if (millis() - timeRecord >= 1)
-        {
-            timeRecord = millis();
-            (digitalRead(Temp_X0)) ? (x_buffer[0] = 0, Input.X0 = 0) : ((x_buffer[0] < myPar.Input_Filter_Time) ? (x_buffer[0]++) : (Input.X0 = 1));
-            (digitalRead(Temp_X1)) ? (x_buffer[1] = 0, Input.X1 = 0) : ((x_buffer[1] < myPar.Input_Filter_Time) ? (x_buffer[1]++) : (Input.X1 = 1));
-            (digitalRead(Temp_X2)) ? (x_buffer[2] = 0, Input.X2 = 0) : ((x_buffer[2] < myPar.Input_Filter_Time) ? (x_buffer[2]++) : (Input.X2 = 1));
-            (digitalRead(Temp_X3)) ? (x_buffer[3] = 0, Input.X3 = 0) : ((x_buffer[3] < myPar.Input_Filter_Time) ? (x_buffer[3]++) : (Input.X3 = 1));
-            (digitalRead(Temp_X4)) ? (x_buffer[4] = 0, Input.X4 = 0) : ((x_buffer[4] < myPar.Input_Filter_Time) ? (x_buffer[4]++) : (Input.X4 = 1));
-            (digitalRead(Temp_X5)) ? (x_buffer[5] = 0, Input.X5 = 0) : ((x_buffer[5] < myPar.Input_Filter_Time) ? (x_buffer[5]++) : (Input.X5 = 1));
-            (digitalRead(Temp_X6)) ? (x_buffer[6] = 0, Input.X6 = 0) : ((x_buffer[6] < myPar.Input_Filter_Time) ? (x_buffer[6]++) : (Input.X6 = 1));
-            (digitalRead(Temp_X7)) ? (x_buffer[7] = 0, Input.X7 = 0) : ((x_buffer[7] < myPar.Input_Filter_Time) ? (x_buffer[7]++) : (Input.X7 = 1));
-        }
-    }
+    Serial.println("g"); Serial.flush();
 }

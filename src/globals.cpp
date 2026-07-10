@@ -1,9 +1,9 @@
 #include <Arduino.h>
 #include <STM32FreeRTOS.h>
+#include <SoftwareSerial.h>
 #include <Ethernet.h>
 #include <SSLClient.h>
 #include <ArduinoMqttClient.h>
-#include <RadioLib.h>
 #include <ADS1X15.h>
 #include "IO_Setting.h"
 #include "Parameter_Config.h"
@@ -22,10 +22,6 @@ SemaphoreHandle_t xMutex = NULL;
 #endif
 
 /* ==================== IO_Setting.h 全局变量定义 ==================== */
-uint8_t idSwitchState = 0;
-uint8_t baudRateSwitchState = 0;
-SPIClass RA01S_SPI(PB15, PB14, PB13);
-GPIO_Port Input;
 AnalogStruct myAI;
 
 /* ==================== Parameter_Config.h 全局变量定义 ==================== */
@@ -40,13 +36,10 @@ ModbusEthernet myModbusTCP;
 
 /* ==================== mySensorTask.h 全局变量定义 ==================== */
 SemaphoreHandle_t xSensorMutex = NULL;
-HardwareSerial HMISerial(HMI_USART_RX, HMI_USART_TX);
+SoftwareSerial HMISerial(HMI_USART_RX, HMI_USART_TX);
 
 /* ==================== myLoRaTask.h 全局变量定义 ==================== */
-SX1262 radio = new Module(RA01S_SPI_NSS, RA01S_DIO1, RA01S_RESET, RA01S_BUSY);
-uint8_t loraRxBuffer[LORA_FRAME_LEN];
-volatile uint8_t loraRxIndex = 0;
-TaskHandle_t xLoRaTaskHandle = NULL;
+// 已移除: RA01S/LoRa 模块在新板未焊接
 
 /* ==================== myMQTT_TLS.h 全局变量定义 ==================== */
 EthernetClient ethernetClient;
@@ -65,7 +58,7 @@ IPAddress gatewayIP;
 IPAddress dnsServerIP;
 
 /* ==================== myESP32C6.h 全局变量定义 ==================== */
-SPIClass ESP32C6_SPI3(ESP32C6_SPI_MOSI, ESP32C6_SPI_MISO, ESP32C6_SPI_SCK);
+SPIClass ESP32C6_SPI3(ESP32C6_SPI_MOSI, ESP32C6_SPI_MISO, ESP32C6_SPI_SCK); // 新板使用SPI2 (PB13/PB14/PB15)
 
 /* ==================== myK210.h 全局变量定义 ==================== */
 HardwareSerial k210Serial(K210_USART_RX, K210_USART_TX);

@@ -5,94 +5,54 @@
 #include "Parameter_Config.h"
 #include "myShowMsg.h"
 
-extern uint8_t idSwitchState;       // 站号拨码开关状态
-extern uint8_t baudRateSwitchState; // 波特率拨码开关状态
+/*********通信引脚 (RS485 Modbus - USART1)*********/
 
-extern SPIClass RA01S_SPI; // SPI2: MOSI, MISO, SCK
+#define mbRxPin PA10   // 接收引脚, USART1_RX
+#define mbTxPin PA9    // 发送引脚, USART1_TX
+#define mbSendEnPin PC4 // 发送使能引脚, 485_EN
 
-/*********通信引脚*********/
+/*********K210摄像头模块引脚定义 (USART2, 暂未使用)*********/
+#define K210_USART_RX PD6 // USART2 RX
+#define K210_USART_TX PD5 // USART2 TX
 
-#define mbRxPin PB11    // 接收引脚
-#define mbTxPin PB10    // 发送引脚
-#define mbSendEnPin PB1 // 发送使能引脚
+/*********ESP32C6Mini模块引脚定义 (SPI2)*********/
+#define ESP32C6_SPI_SCK PB13  // SPI2_SCK
+#define ESP32C6_SPI_MOSI PB15 // SPI2_MOSI
+#define ESP32C6_SPI_MISO PB14 // SPI2_MISO
+#define ESP32C6_SPI_CS PB12   // SPI2_NSS, 硬件片选
 
-/*********K210摄像头模块引脚定义*********/
-#define K210_USART_RX PC7 // USART6 RX
-#define K210_USART_TX PC6 // USART6 TX
+/*********4G模块引脚定义 (USART6)*********/
+#define G4G_UART_TX PA7  // USART6 TX
+#define G4G_UART_RX PA6  // USART6 RX
+#define G4G_RDY PE6      // 模块就绪状态
+#define G4G_DTR PE5      // 数据终端就绪
+#define G4G_RST PC11     // 模块复位
 
-/*********ESP32C6Mini模块引脚定义*********/
-#define ESP32C6_SPI_SCK PC10  // SPI3_SCK
-#define ESP32C6_SPI_MOSI PC12 // SPI3_MOSI
-#define ESP32C6_SPI_MISO PC11 // SPI3_MISO
-#define ESP32C6_SPI_CS PD3    // CS
-#define ESP32C6_EN PE0        // EN
+/*********LCD SPI屏幕引脚定义 (SPI1)*********/
+#define LCD_BLK PE4  // 背光, 可PWM调光
+#define LCD_CS PE3   // 片选
+#define LCD_DC PE2   // 数据/命令选择
+#define LCD_SDI PB5  // SPI1 MOSI, 只写无需MISO
+#define LCD_SCK PB3  // SPI1 SCK, 重映射
 
-/*********Ra-01S模块引脚定义*********/
-#define RA01S_RESET PC0  // RESET
-#define RA01S_DIO1 PD2   // DIO1 - 修改为PD2，避免与RUN_LED(PC2)冲突
-#define RA01S_SPI_NSS PB12 // SPI2_NSS
-#define RA01S_SPI_MOSI PB15 // SPI2_MOSI
-#define RA01S_SPI_MISO PB14 // SPI2_MISO
-#define RA01S_SPI_SCK PB13 // SPI2_SCK
-#define RA01S_BUSY PC1   // BUSY
+/*********串口屏引脚定义 (UART7)*********/
+#define HMI_USART_RX PC10 // UART7 RX
+#define HMI_USART_TX PA15 // UART7 TX
 
-/*********串口屏引脚定义*********/
-#define HMI_USART_RX PA1 // USART4 RX
-#define HMI_USART_TX PA0 // USART4 TX
-
-/*********拨码开关引脚定义*********/
-/**
- * SW_B1 SW_B2 SW_B3组合表示站号
- * SW_B4 SW_B5 组合表示波特率
- */
-#define SW_B1 PC15
-#define SW_B2 PE3
-#define SW_B3 PE2
-#define SW_B4 PE1
-#define SW_B5 PC3
-
-/*********输入引脚定义*********/
-#define Temp_X0 PD10
-#define Temp_X1 PD11
-#define Temp_X2 PD12
-#define Temp_X3 PD13
-#define Temp_X4 PA8
-#define Temp_X5 PB0
-#define Temp_X6 PE6
-#define Temp_X7 PE4
-
-/// @brief GPIO端口定义
-typedef struct
-{
-    uint8_t X0 : 1;
-    uint8_t X1 : 1;
-    uint8_t X2 : 1;
-    uint8_t X3 : 1;
-    uint8_t X4 : 1;
-    uint8_t X5 : 1;
-    uint8_t X6 : 1;
-    uint8_t X7 : 1;
-} GPIO_Port;
-
-/// @brief 输入端口
-extern GPIO_Port Input;
-
-/*********输出引脚定义*********/
-#define Output_Y0 PA15
-#define Output_Y1 PB3
-#define Output_Y2 PB4
-#define Output_Y3 PB5
-#define Output_Y4 PB6
-#define Output_Y5 PB7
-#define Output_Y6 PE10
-#define Output_Y7 PE11
-#define Output_Y8 PE12
-#define Output_Y9 PE13
+/*********输出引脚定义 (8路继电器 PE7~PE14)*********/
+/* Y1~Y4: 加湿器1~4 | Y5~Y8: 风机1~4 */
+#define Output_Y1 PE7   // 加湿器1
+#define Output_Y2 PE8   // 加湿器2
+#define Output_Y3 PE9   // 加湿器3
+#define Output_Y4 PE10  // 加湿器4
+#define Output_Y5 PE11  // 风机1
+#define Output_Y6 PE12  // 风机2
+#define Output_Y7 PE13  // 风机3
+#define Output_Y8 PE14  // 风机4
 
 /*********指示灯定义*********/
-#define ERROR_LED PC13
-#define RUN_LED PC2
-#define BOARD_LED PB2 // 板载运行指示灯，高电平点亮
+#define ERROR_LED PE1 // 高电平点亮
+#define RUN_LED PE0   // 高电平点亮
 
 /*********模拟量定义*********/
 typedef struct
@@ -113,8 +73,5 @@ void pinMode_OutSetting(uint32_t ulPin);
  * GPIO初始化
  */
 void GPIO_Init();
-
-/*输入滤波函数*/
-void X_filter(void *pvParameters); // 每1MS调用一次，用来给输入滤波,滤波时间由Input_Filter_Time指定，默认5ms
 
 #endif

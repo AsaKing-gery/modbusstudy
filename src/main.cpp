@@ -48,18 +48,18 @@ void ShowSystemInfo()
   HAL_RCC_GetOscConfig(&oscinitstruct);
   ShowMsg("LSEState:" + String(oscinitstruct.LSEState), true);
   ShowMsg("HSEState:" + String(oscinitstruct.HSEState), true);
-  ShowMsg("PLL.PLLMUL:" + String(oscinitstruct.PLL.PLLMUL), true);
+  ShowMsg("PLL.PLLM:" + String(oscinitstruct.PLL.PLLM), true);
   ShowMsg("PLL.PLLSource:" + String(oscinitstruct.PLL.PLLSource), true);
   ShowMsg("PLL.PLLState:" + String(oscinitstruct.PLL.PLLState), true);
   ShowMsg("", true);
   
   // 获取系统时钟频率
   ShowMsg("Clock:" + String(HAL_RCC_GetSysClockFreq()), true);
-  // 获取MCU ID
-  ShowMsg("MCU ID 0:" + String(GetMCUId(), HEX), true);
-  ShowMsg("MCU ID 1:" + String(GetMCUId(1), HEX), true);
-  ShowMsg("MCU ID 2:" + String(GetMCUId(2), HEX), true);
-  ShowMsg("", true);
+  // 获取MCU ID - 使用裸Serial避免String+ShowMsg开销
+  Serial.print("ID0:"); Serial.println(GetMCUId(), HEX); Serial.flush();
+  Serial.print("ID1:"); Serial.println(GetMCUId(1), HEX); Serial.flush();
+  Serial.print("ID2:"); Serial.println(GetMCUId(2), HEX); Serial.flush();
+  Serial.println(); Serial.flush();
 #endif
 }
 
@@ -69,19 +69,21 @@ void ShowSystemInfo()
 void setup()
 {
   /*硬件层初始化*/
-  Serial.setTx(PD5);    // 发送信息端口重定向
-  Serial.setRx(PD6);   // 发送信息端口重定向
+  Serial.setTx(PD5);    // 发送信息端口重定向 (新板PD5=K210_TX, 调试与K210共用)
+  Serial.setRx(PD6);   // 发送信息端口重定向 (新板PD6=K210_RX, 调试与K210共用)
   Serial.begin(115200); // 串口初始化
   Serial.println("System Version:" + String(Version));
   Serial.println("Remote IO System Start...");
-
-    ShowMsg("", true);
-    // 显示系统信息
+  // 显示系统信息
+    Serial.println("1"); Serial.flush();
     ShowSystemInfo();
+    Serial.println("2"); Serial.flush();
     // 加载参数
     Load_Parameter();
+    Serial.println("3"); Serial.flush();
     // GPIO初始化
     GPIO_Init();
+    Serial.println("4"); Serial.flush();
     // 网络初始化（DHCP或静态IP）
     // Network_Init();
     // Modbus应用协议初始化
@@ -95,9 +97,8 @@ void setup()
     SensorSerial_Init();
     // MQTT over TLS 初始化
     // MQTT_TLS_Init();
-    ShowMsg("", true);
-    ShowMsg("Setup Init Success", true);
-    ShowMsg("", true);
+    ShowMsg("s", true);
+    ShowMsg("OK", true);
 
     /*任务初始化,创建所有任务*/
     xTaskCreate(CreateTaskMethods,
