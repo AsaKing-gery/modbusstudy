@@ -8,7 +8,6 @@
 #include "mySensorTask.h"
 // #include "myMQTT_TLS.h"
 // #include "myLoRaTask.h"
-#include "myADS1115.h"
 #include "myShowMsg.h"
 
 void WatchdogTask(void *pvParameters)
@@ -36,49 +35,6 @@ void WatchdogTask(void *pvParameters)
         {
             digitalWrite(ERROR_LED, LOW);
         }
-    }
-}
-
-void IICTask(void *pvParameters)
-{
-    uint8_t ADS1115InitCounter = 0;
-
-    Wire.setSDA(PB9);
-    Wire.setSCL(PB8);
-    Wire.begin();
-    ShowMsg("ADS1115 Init start:", true);
-    while (!InitializeADS1115())
-    {
-        ShowMsg("ADS1115 Init Failed,Try again!", true);
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        ADS1115InitCounter++;
-        if (ADS1115InitCounter > 5)
-        {
-            ShowMsg("ADS1115 Init Failed,Exit!", true);
-            myModbusRTU.setHreg(15, 32767);
-            myModbusRTU.setHreg(16, 32767);
-            myModbusRTU.setHreg(17, 32767);
-            myModbusRTU.setHreg(18, 32767);
-            vTaskDelete(NULL);
-        }
-    }
-    ShowMsg("ADS1115 Init OK", true);
-
-    while (true)
-    {
-        static uint32_t delayTime;
-
-        if (millis() - delayTime > 1000)
-        {
-            ShowMsg("Read ADS1115...");
-            ReadADS1115All(myAI.AI0, myAI.AI1, myAI.AI2, myAI.AI3);
-            myModbusRTU.setHreg(15, myAI.AI0);
-            myModbusRTU.setHreg(16, myAI.AI1);
-            myModbusRTU.setHreg(17, myAI.AI2);
-            myModbusRTU.setHreg(18, myAI.AI3);
-            delayTime = millis();
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
@@ -122,15 +78,6 @@ void MainTask(void *pvParameters)
     bool runLedTemp = false;
 
     Load_ParameterTORegister();
-    ShowMsg("", true);
-    ShowMsg("Parameter SaveFlag:" + String(myPar.InitFlag), true);
-    ShowMsg("ID:" + String(myPar.SlaveId), true);
-    ShowMsg("BaudRate:" + String(myPar.Baudrate), true);
-    ShowMsg("IP:" + String(myPar.ip[0]) + "." + String(myPar.ip[1]) + "." + String(myPar.ip[2]) + "." + String(myPar.ip[3]), true);
-    ShowMsg("Port:" + String(MODBUSIP_PORT), true);
-    ShowMsg("Mac:" + String(myPar.mac[0]) + " " + String(myPar.mac[1]) + " " + String(myPar.mac[2]) + " ");
-    ShowMsg(String(myPar.mac[3]) + " " + String(myPar.mac[4]) + " " + String(myPar.mac[5]), true);
-    ShowMsg("", true);
     while (true)
     {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -188,33 +135,13 @@ void MainTask(void *pvParameters)
 void CreateTaskMethods(void *pvParameters)
 {
     xTaskCreate(WatchdogTask, "WatchdogTask", 96, NULL, 6, NULL);
-    ShowMsg("Watchdog task created.", true);
-
     xTaskCreate(ModbusRTUTask, "ModbusRTUSevice", 128, NULL, 5, NULL);
-    ShowMsg("ModbusRTU task created.", true);
-
     // xTaskCreate(ModbusTCPTask, "ModbusTCPTask", 128 * 2, NULL, 5, NULL);
-    // ShowMsg("ModbusTCP task created.", true);
-
-    xTaskCreate(IICTask, "IICTask", 128 * 3, NULL, 3, NULL);
-    ShowMsg("IIC task created.", true);
-
+    // IIC/ADS1115 已移除
     xTaskCreate(MainTask, "MainTask", 128 * 2, NULL, 3, NULL);
-    ShowMsg("MainTask created.", true);
-
     xTaskCreate(SensorStateMachineTask, "SensorTask", 128 * 2, NULL, 2, NULL);
-    ShowMsg("Sensor state machine task created.", true);
-
     xTaskCreate(HMIReceiveTask, "HMIReceiveTask", 128 * 2, NULL, 3, NULL);
-    ShowMsg("HMI Receive task created.", true);
-
-    // xTaskCreate(LoRaReceiveTask, "LoRaReceiveTask", 128 * 2, NULL, 4, NULL);
-    // ShowMsg("LoRa Receive task created.", true);
-
     // xTaskCreate(MQTT_TLS_Task, "MQTT_TLS_Task", MQTT_TASK_STACK_SIZE, NULL, MQTT_TASK_PRIORITY, NULL);
-    // ShowMsg("MQTT TLS task created.", true);
-
-    ShowMsg("All Task Create Success", true);
-    ShowMsg("", true);
+    ShowMsg("Tasks OK", true);
     vTaskDelete(NULL);
 }

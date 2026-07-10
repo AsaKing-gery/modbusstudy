@@ -4,14 +4,12 @@
 #include <Ethernet.h>
 #include <SSLClient.h>
 #include <ArduinoMqttClient.h>
-#include <ADS1X15.h>
 #include "IO_Setting.h"
 #include "Parameter_Config.h"
 #include "myModbus.h"
 #include "myMQTT_TLS.h"
 #include "myLoRaTask.h"
 #include "mySensorTask.h"
-#include "myADS1115.h"
 #include "myNetworkConfig.h"
 #include "trust_anchor.h"
 #include "myK210.h"
@@ -64,4 +62,4 @@ SPIClass ESP32C6_SPI3(ESP32C6_SPI_MOSI, ESP32C6_SPI_MISO, ESP32C6_SPI_SCK); // �
 HardwareSerial k210Serial(K210_USART_RX, K210_USART_TX);
 
 /* ==================== myADS1115.h 全局变量定义 ==================== */
-ADS1115 ADS(0x48);
+// 已移除: ADS1115/I2C 新板未焊接

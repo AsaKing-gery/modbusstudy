@@ -24,16 +24,8 @@
 #define REG_TEMP_HUMID_START 0x0000
 #define REG_TEMP_HUMID_COUNT 0x0002
 
-#define REG_CO2_START        0x0005
-#define REG_CO2_COUNT        0x0001
-
-#define REG_NH3_START        0x0009
-#define REG_NH3_COUNT        0x0001
-
 /* 响应帧长度 */
 #define RESP_TEMP_HUMID_LEN  9  // 01 03 04 HH HL TH TL CRCL CRCH
-#define RESP_CO2_LEN         7  // 01 03 02 CH CL CRCL CRCH
-#define RESP_NH3_LEN         7  // 01 03 02 NH NL CRCL CRCH
 
 /* ==================== 串口屏通信协议 ==================== */
 /*
@@ -144,8 +136,6 @@ void HMIReceiveTask(void *pvParameters);
 enum SensorState
 {
     STATE_READ_TEMP_HUMID = 0,  // 读取温湿度
-    STATE_READ_CO2,             // 读取CO2
-    STATE_READ_NH3,             // 读取NH3
     STATE_SEND_HMI,             // 发送数据到串口屏
     STATE_WAIT_INTERVAL         // 等待轮询间隔
 };

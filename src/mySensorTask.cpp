@@ -199,7 +199,6 @@ void HMIReceiveTask(void *pvParameters)
 
     uint8_t rxBuffer[8];
     uint8_t rxIdx = 0;
-    uint32_t lastAlivePrint = 0;
 
     while (true)
     {
@@ -207,8 +206,8 @@ void HMIReceiveTask(void *pvParameters)
         {
             uint8_t byte = HMISerial.read();
 
-            // 诊断打印（每字节）
-            ShowMsg("[HMI] RX byte: 0x" + String(byte, HEX), true);
+            // 诊断打印（仅在新数据时输出）
+            // ShowMsg("[HMI] RX byte: 0x" + String(byte, HEX), true);
 
             if (rxIdx == 0)
             {
@@ -282,13 +281,6 @@ void HMIReceiveTask(void *pvParameters)
         }
 
         vTaskDelay(pdMS_TO_TICKS(5));
-
-        // 每3秒打印一次心跳，确认任务存活
-        if (millis() - lastAlivePrint > 3000)
-        {
-            lastAlivePrint = millis();
-            ShowMsg("[HMI] task alive, HMISerial.available=" + String(HMISerial.available()), true);
-        }
     }
 }
 
@@ -305,11 +297,7 @@ void SensorStateMachineTask(void *pvParameters)
 
     float cachedHumidity = 0.0f;
     float cachedTemperature = 0.0f;
-    float cachedCO2 = 0.0f;
-    float cachedNH3 = 0.0f;
     bool hasTempHumid = false;
-    bool hasCO2 = false;
-    bool hasNH3 = false;
 
     while (true)
     {
@@ -335,62 +323,7 @@ void SensorStateMachineTask(void *pvParameters)
                 }
                 else
                 {
-                    ShowMsg("TempHumid read failed", true);
                     hasTempHumid = false;
-                }
-                xSemaphoreGive(xSensorMutex);
-            }
-            state = STATE_READ_CO2;
-            break;
-        }
-
-        case STATE_READ_CO2:
-        {
-            if (xSemaphoreTake(xSensorMutex, pdMS_TO_TICKS(100)) == pdTRUE)
-            {
-                uint8_t txLen = BuildModbusFrame(txFrame, SENSOR_SLAVE_ID, SENSOR_FUNC_CODE,
-                                                  REG_CO2_START, REG_CO2_COUNT);
-                SendSensorFrame(txFrame, txLen);
-                vTaskDelay(pdMS_TO_TICKS(100));
-                uint8_t rxLen = ReceiveSensorResponse(rxBuffer, RESP_CO2_LEN, 200);
-
-                if (rxLen == RESP_CO2_LEN && VerifyResponseCRC(rxBuffer, rxLen))
-                {
-                    uint16_t co2Raw = (rxBuffer[3] << 8) | rxBuffer[4];
-                    cachedCO2 = (float)co2Raw;
-                    hasCO2 = true;
-                }
-                else
-                {
-                    ShowMsg("CO2 read failed", true);
-                    hasCO2 = false;
-                }
-                xSemaphoreGive(xSensorMutex);
-            }
-            state = STATE_READ_NH3;
-            break;
-        }
-
-        case STATE_READ_NH3:
-        {
-            if (xSemaphoreTake(xSensorMutex, pdMS_TO_TICKS(100)) == pdTRUE)
-            {
-                uint8_t txLen = BuildModbusFrame(txFrame, SENSOR_SLAVE_ID, SENSOR_FUNC_CODE,
-                                                  REG_NH3_START, REG_NH3_COUNT);
-                SendSensorFrame(txFrame, txLen);
-                vTaskDelay(pdMS_TO_TICKS(100));
-                uint8_t rxLen = ReceiveSensorResponse(rxBuffer, RESP_NH3_LEN, 200);
-
-                if (rxLen == RESP_NH3_LEN && VerifyResponseCRC(rxBuffer, rxLen))
-                {
-                    uint16_t nh3Raw = (rxBuffer[3] << 8) | rxBuffer[4];
-                    cachedNH3 = nh3Raw / 100.0f;
-                    hasNH3 = true;
-                }
-                else
-                {
-                    ShowMsg("NH3 read failed", true);
-                    hasNH3 = false;
                 }
                 xSemaphoreGive(xSensorMutex);
             }
@@ -405,16 +338,6 @@ void SensorStateMachineTask(void *pvParameters)
                 SendToHMI(HMI_FLAG_HUMID, cachedHumidity, 1);
                 vTaskDelay(pdMS_TO_TICKS(10));
                 SendToHMI(HMI_FLAG_TEMP, cachedTemperature, 1);
-                vTaskDelay(pdMS_TO_TICKS(10));
-            }
-            if (hasCO2)
-            {
-                SendToHMI(HMI_FLAG_CO2, cachedCO2, 0);
-                vTaskDelay(pdMS_TO_TICKS(10));
-            }
-            if (hasNH3)
-            {
-                SendToHMI(HMI_FLAG_NH3, cachedNH3, 2);
             }
 
             uint16_t sensorStatus = 0;
@@ -424,16 +347,6 @@ void SensorStateMachineTask(void *pvParameters)
                 myModbusRTU.setHreg(REG_SENSOR_HUMID, (uint16_t)(cachedHumidity * 10.0f));
                 sensorStatus |= 0x01;
             }
-            if (hasCO2)
-            {
-                myModbusRTU.setHreg(REG_SENSOR_CO2, (uint16_t)cachedCO2);
-                sensorStatus |= 0x02;
-            }
-            if (hasNH3)
-            {
-                myModbusRTU.setHreg(REG_SENSOR_NH3, (uint16_t)(cachedNH3 * 100.0f));
-                sensorStatus |= 0x04;
-            }
             myModbusRTU.setHreg(REG_SENSOR_STATUS, sensorStatus);
 
             if (xSensorDataMutex != NULL && xSemaphoreTake(xSensorDataMutex, pdMS_TO_TICKS(50)) == pdTRUE)
@@ -442,14 +355,6 @@ void SensorStateMachineTask(void *pvParameters)
                 {
                     deviceState.temperature = cachedTemperature;
                     deviceState.humidity = cachedHumidity;
-                }
-                if (hasCO2)
-                {
-                    deviceState.co2 = cachedCO2;
-                }
-                if (hasNH3)
-                {
-                    deviceState.nh3 = cachedNH3;
                 }
                 xSemaphoreGive(xSensorDataMutex);
             }
@@ -465,8 +370,6 @@ void SensorStateMachineTask(void *pvParameters)
             {
                 state = STATE_READ_TEMP_HUMID;
                 hasTempHumid = false;
-                hasCO2 = false;
-                hasNH3 = false;
             }
             vTaskDelay(pdMS_TO_TICKS(100));
             break;

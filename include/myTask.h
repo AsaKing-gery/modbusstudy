@@ -6,10 +6,7 @@
 #include <IWatchdog.h>
 #include "IO_Setting.h"
 #include "myModbus.h"
-#include "myADS1115.h"
 #include "mySensorTask.h"
-#include "myLoRaTask.h"
-#include "myMQTT_TLS.h"
 // #include "myExternaIO.h"
 
 // 设定字中的位状态
@@ -40,11 +37,8 @@ extern TaskHandle_t taskTest;
 void TaskStackTest(void *pvParameters);
 #endif
 
-// IIC任务,本打算用来读取ADS1115的数值，但总是无法正确读取，这里就先取消
-//  /**
-//   * @brief IIC任务
-//   */
-void IICTask(void *pvParameters);
+// IIC/ADS1115 已移除 - 新板未焊接
+// void IICTask(void *pvParameters);
 
 /**
  * 将参数加载到MB寄存器中
