@@ -33,6 +33,7 @@
 #include "modbus/modbus_rtu.h"
 #include "modbus/modbus_tcp.h"
 #include "modules/hmi.h"
+#include "modules/esp32.h"
 
 /* ========================== 系统启动 ========================== */
 
@@ -58,6 +59,7 @@ void setup(void)
 
     modbus_rtu_init();      /* USART1 + RS485 */
     modbus_tcp_init();      /* Stub */
+    esp32_init();           /* SPI2 slave + IRQ */
     hmi_init();             /* SoftwareSerial + UART7 pins */
 
     TRACE_LN("OK");

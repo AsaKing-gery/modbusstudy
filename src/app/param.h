@@ -29,7 +29,15 @@ struct SystemParam
     uint8_t  mac[6];              /**< MAC 地址 */
     uint8_t  ip[4];               /**< 静态 IP */
     uint16_t input_filter_ms;     /**< 输入滤波时间 ms */
-    uint16_t threshold[4];        /**< 阈值 A/B/C/D */
+    uint16_t threshold[4];        /**< 阈值 A/B/C/D (页面9) */
+    uint16_t temp_hi_x100;        /**< 温度上限 ×100 (页面3控件26) */
+    uint16_t temp_lo_x100;        /**< 温度下限 ×100 */
+    uint16_t humi_hi_x100;        /**< 湿度上限 ×100 (页面3控件27) */
+    uint16_t humi_lo_x100;        /**< 湿度下限 ×100 */
+    uint16_t co2_hi;              /**< CO2 上限 ppm (页面3控件28) */
+    uint16_t co2_lo;              /**< CO2 下限 ppm */
+    uint16_t nh3_hi_x100;         /**< NH3 上限 ×100 (页面3控件29) */
+    uint16_t nh3_lo_x100;         /**< NH3 下限 ×100 */
 
     /** 默认构造函数 */
     SystemParam()
@@ -39,6 +47,10 @@ struct SystemParam
         , mac{0xAB, 0xCD, 0xEF, 0x12, 0x34, 0x56}
         , ip{192, 168, 1, 168}
         , input_filter_ms(5)
+        , temp_hi_x100(3500), temp_lo_x100(2400)
+        , humi_hi_x100(7000), humi_lo_x100(5000)
+        , co2_hi(3000), co2_lo(0)
+        , nh3_hi_x100(2000), nh3_lo_x100(0)
     {
         threshold[0] = threshold[1] = threshold[2] = threshold[3] = 0;
     }
@@ -56,7 +68,15 @@ extern SystemParam g_param;
  * Offset 12: ip[4]             (4B)
  * Offset 16: input_filter_ms   (2B)
  * Offset 18: threshold[4]      (8B)
- * Total: 26 字节
+ * Offset 26: temp_hi_x100      (2B)
+ * Offset 28: temp_lo_x100      (2B)
+ * Offset 30: humi_hi_x100      (2B)
+ * Offset 32: humi_lo_x100      (2B)
+ * Offset 34: co2_hi            (2B)
+ * Offset 36: co2_lo            (2B)
+ * Offset 38: nh3_hi_x100       (2B)
+ * Offset 40: nh3_lo_x100       (2B)
+ * Total: 42 字节
  */
 #define EE_OFFSET_FLAG          0
 #define EE_OFFSET_SLAVEID       1
@@ -65,7 +85,15 @@ extern SystemParam g_param;
 #define EE_OFFSET_IP            12
 #define EE_OFFSET_FILTER        16
 #define EE_OFFSET_THRESHOLD     18
-#define EE_TOTAL_SIZE           26
+#define EE_OFFSET_TEMP_HI       26
+#define EE_OFFSET_TEMP_LO       28
+#define EE_OFFSET_HUMI_HI       30
+#define EE_OFFSET_HUMI_LO       32
+#define EE_OFFSET_CO2_HI        34
+#define EE_OFFSET_CO2_LO        36
+#define EE_OFFSET_NH3_HI        38
+#define EE_OFFSET_NH3_LO        40
+#define EE_TOTAL_SIZE           42
 
 /* ========================== 函数声明 ========================== */
 

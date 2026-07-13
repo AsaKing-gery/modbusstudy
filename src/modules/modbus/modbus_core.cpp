@@ -57,6 +57,15 @@ void modbus_load_from_param(void)
     g_regs[REG_THRESHOLD_B]  = g_param.threshold[1];
     g_regs[REG_THRESHOLD_C]  = g_param.threshold[2];
     g_regs[REG_THRESHOLD_D]  = g_param.threshold[3];
+    /* 页面3传感器阈值 */
+    g_regs[REG_TEMP_HI_X100] = g_param.temp_hi_x100;
+    g_regs[REG_TEMP_LO_X100] = g_param.temp_lo_x100;
+    g_regs[REG_HUMI_HI_X100] = g_param.humi_hi_x100;
+    g_regs[REG_HUMI_LO_X100] = g_param.humi_lo_x100;
+    g_regs[REG_CO2_HI]       = g_param.co2_hi;
+    g_regs[REG_CO2_LO]       = g_param.co2_lo;
+    g_regs[REG_NH3_HI_X100]  = g_param.nh3_hi_x100;
+    g_regs[REG_NH3_LO_X100]  = g_param.nh3_lo_x100;
     /* REG_COMMAND, REG_UPTIME, REG_OUTPUT_STATE 为运行时值 */
 }
 
@@ -79,6 +88,15 @@ void modbus_save_to_param(void)
     g_param.threshold[1] = g_regs[REG_THRESHOLD_B];
     g_param.threshold[2] = g_regs[REG_THRESHOLD_C];
     g_param.threshold[3] = g_regs[REG_THRESHOLD_D];
+    /* 页面3传感器阈值 */
+    g_param.temp_hi_x100 = g_regs[REG_TEMP_HI_X100];
+    g_param.temp_lo_x100 = g_regs[REG_TEMP_LO_X100];
+    g_param.humi_hi_x100 = g_regs[REG_HUMI_HI_X100];
+    g_param.humi_lo_x100 = g_regs[REG_HUMI_LO_X100];
+    g_param.co2_hi       = g_regs[REG_CO2_HI];
+    g_param.co2_lo       = g_regs[REG_CO2_LO];
+    g_param.nh3_hi_x100  = g_regs[REG_NH3_HI_X100];
+    g_param.nh3_lo_x100  = g_regs[REG_NH3_LO_X100];
 
     param_save();
 }

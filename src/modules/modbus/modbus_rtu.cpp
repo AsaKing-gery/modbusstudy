@@ -93,11 +93,24 @@ static void sync_registers_from_mb(void)
 /* ========================== 从共享表同步到 ModbusSerial ========================== */
 static void sync_registers_to_mb(void)
 {
-    /* 只同步只读/运行时寄存器 */
-    mb.setHreg(REG_VERSION,      modbus_reg_get(REG_VERSION));
-    mb.setHreg(REG_UPTIME,       modbus_reg_get(REG_UPTIME));
-    /* 保护只读寄存器 */
+    /* 同步只读寄存器到 ModbusSerial (写保护) */
     mb.setHreg(REG_VERSION,      FIRMWARE_VERSION);
+    mb.setHreg(REG_UPTIME,       modbus_reg_get(REG_UPTIME));
+
+    /* 推送 HMI 可能修改的可写寄存器，保持 mb 内部与共享表一致 */
+    mb.setHreg(REG_OUTPUT_STATE, modbus_reg_get(REG_OUTPUT_STATE));
+    mb.setHreg(REG_THRESHOLD_A,  modbus_reg_get(REG_THRESHOLD_A));
+    mb.setHreg(REG_THRESHOLD_B,  modbus_reg_get(REG_THRESHOLD_B));
+    mb.setHreg(REG_THRESHOLD_C,  modbus_reg_get(REG_THRESHOLD_C));
+    mb.setHreg(REG_THRESHOLD_D,  modbus_reg_get(REG_THRESHOLD_D));
+
+    /* ESP32 传感器数据 (只读，保护不被 Modbus Master 覆写) */
+    mb.setHreg(REG_TEMP_X100,    modbus_reg_get(REG_TEMP_X100));
+    mb.setHreg(REG_HUMI_X100,    modbus_reg_get(REG_HUMI_X100));
+    mb.setHreg(REG_CO2,          modbus_reg_get(REG_CO2));
+    mb.setHreg(REG_NH3_X100,     modbus_reg_get(REG_NH3_X100));
+    mb.setHreg(REG_LUX_X100,     modbus_reg_get(REG_LUX_X100));
+    mb.setHreg(REG_ESP32_STATUS, modbus_reg_get(REG_ESP32_STATUS));
 }
 
 /* ========================== 任务循环 ========================== */

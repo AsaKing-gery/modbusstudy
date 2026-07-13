@@ -12,9 +12,10 @@
 /* ========================== 系统时钟 ========================== */
 #define SYSCLK_FREQ_HZ      168000000UL
 
-/* ========================== 调试串口 ========================== */
-/** 调试输出重映射到 USART2 (PD5=TX, PD6=RX)，与 K210 共用 */
-#define DEBUG_SERIAL         Serial
+/* ========================== 调试串口 (USART2: PD5=TX, PD6=RX) ========================== */
+/** 调试串口：USART2，与 K210 共享物理引脚，调试期间 K210 禁用 */
+extern HardwareSerial DebugSerial;
+#define DEBUG_SERIAL         DebugSerial
 #define DEBUG_BAUDRATE       115200
 
 /* ========================== 运行指示灯 ========================== */
@@ -50,12 +51,15 @@ extern HardwareSerial RS485_SERIAL;                 /**< USART1 实例 */
 #define PIN_HMI_TX           PA15                /**< UART7_TX */
 #define PIN_HMI_RX           PC10                /**< UART7_RX */
 
-/* ========================== ESP32 (SPI 从机) ========================== */
+/* ========================== ESP32 (SPI 从机 - 1MHz MODE0) ========================== */
 #define ESP32_SPI            SPI2
-#define PIN_ESP32_SCK        PB13                /**< SPI2_SCK */
-#define PIN_ESP32_MISO       PB14                /**< SPI2_MISO */
-#define PIN_ESP32_MOSI       PB15                /**< SPI2_MOSI */
-#define PIN_ESP32_NSS        PB12                /**< SPI2_NSS (硬件片选) */
+#define ESP32_SPI_AF         GPIO_AF5_SPI2
+#define ESP32_SPI_IRQn       SPI2_IRQn
+#define ESP32_SPI_FRAME_LEN  14       /**< 固定帧长度 14 字节 */
+#define PIN_ESP32_SCK        PB13     /**< SPI2_SCK  (AF5) */
+#define PIN_ESP32_MISO       PB14     /**< SPI2_MISO (AF5) */
+#define PIN_ESP32_MOSI       PB15     /**< SPI2_MOSI (AF5) */
+#define PIN_ESP32_NSS        PB12     /**< SPI2_NSS  (AF5, 硬件NSS) */
 
 /* ========================== 4G 模块 (USART6) ========================== */
 #define G4G_SERIAL           Serial6             /**< USART6 */
@@ -66,8 +70,8 @@ extern HardwareSerial RS485_SERIAL;                 /**< USART1 实例 */
 #define PIN_G4G_DTR          PE5                 /**< 数据终端就绪输出 */
 #define PIN_G4G_RST          PC11                /**< 模块复位输出 */
 
-/* ========================== K210 摄像头 (USART2) ========================== */
-#define K210_SERIAL          Serial2             /**< USART2 */
+/* ========================== K210 摄像头 (USART2 - 调试复用，当前禁用) ========================== */
+#define K210_SERIAL          Serial2             /**< USART2 (与调试串口共用 PD5/PD6) */
 #define K210_BAUDRATE        115200
 #define PIN_K210_TX          PD5                 /**< USART2_TX */
 #define PIN_K210_RX          PD6                 /**< USART2_RX */
@@ -85,25 +89,28 @@ extern HardwareSerial RS485_SERIAL;                 /**< USART1 实例 */
 #define PIN_SWD_DIO          PA13
 
 /* ========================== 看门狗 ========================== */
-#define WDT_TIMEOUT_MS       400                 /**< IWDG 超时时间 */
+#define WDT_TIMEOUT_MS       2000                /**< IWDG 超时时间 (需覆盖Flash扇区擦除~1s) */
 
 /* ========================== FreeRTOS ========================== */
-#define TASK_STACK_WATCHDOG  96
-#define TASK_STACK_MODBUS    128
-#define TASK_STACK_MAIN      256
-#define TASK_STACK_HMI       256
-#define TASK_STACK_MODBUS_TCP 256
+#define TASK_STACK_WATCHDOG    96
+#define TASK_STACK_MODBUS      128
+#define TASK_STACK_MAIN        256
+#define TASK_STACK_HMI         768     /**< 复合帧 vsnprintf + debug 打印 需大栈 */
+#define TASK_STACK_MODBUS_TCP  256
+#define TASK_STACK_ESP32       768
 
-#define TASK_PRIO_WATCHDOG   6
-#define TASK_PRIO_MODBUS     5
-#define TASK_PRIO_MAIN       3
-#define TASK_PRIO_HMI        3
-#define TASK_PRIO_MODBUS_TCP 2
+#define TASK_PRIO_WATCHDOG     6
+#define TASK_PRIO_MODBUS       5
+#define TASK_PRIO_MAIN         3
+#define TASK_PRIO_HMI          4
+#define TASK_PRIO_MODBUS_TCP   2
+#define TASK_PRIO_ESP32        2
 
 /* ========================== Modbus 寄存器地址定义 ========================== */
-/** 保持寄存器 (Holding Registers) 精简映射表 */
+/** 保持寄存器 (Holding Registers) */
 enum ModbusRegister
 {
+    /* 参数区 (0-9, 部分可写 EEPROM) */
     REG_VERSION          = 0,    /**< R    固件版本号 */
     REG_SLAVE_ID         = 1,    /**< R/W  从站地址 (EEPROM) */
     REG_BAUDRATE         = 2,    /**< R/W  RS485 波特率 (EEPROM) */
@@ -114,13 +121,34 @@ enum ModbusRegister
     REG_IP_PART1         = 7,    /**< R/W  IP 高16位 [192,168] (EEPROM) */
     REG_IP_PART2         = 8,    /**< R/W  IP 低16位 [1,168]  (EEPROM) */
     REG_INPUT_FILTER     = 9,    /**< R/W  输入滤波时间 ms (EEPROM) */
+
+    /* 运行数据区 (10-15) */
     REG_UPTIME           = 10,   /**< R    系统运行时间 秒 */
     REG_OUTPUT_STATE     = 11,   /**< R/W  8路继电器输出状态 bit0~7 */
     REG_THRESHOLD_A      = 12,   /**< R/W  阈值A (EEPROM) */
     REG_THRESHOLD_B      = 13,   /**< R/W  阈值B (EEPROM) */
     REG_THRESHOLD_C      = 14,   /**< R/W  阈值C (EEPROM) */
     REG_THRESHOLD_D      = 15,   /**< R/W  阈值D (EEPROM) */
-    REG_COUNT            = 16    /**<       寄存器总数 */
+
+    /* ESP32 传感器数据区 (16-21, 只读: 来自云端/传感器) */
+    REG_TEMP_X100        = 16,   /**< R    温度 ×100 °C (int16) */
+    REG_HUMI_X100        = 17,   /**< R    湿度 ×100 %  (int16) */
+    REG_CO2              = 18,   /**< R    CO2 ppm         (int16) */
+    REG_NH3_X100         = 19,   /**< R    NH3 ×100 ppm   (int16) */
+    REG_LUX_X100         = 20,   /**< R    光照 ×100 lux  (int16) */
+    REG_ESP32_STATUS     = 21,   /**< R    bit0=已连接 bit1=帧有效 bit2-7=运行帧数 */
+
+    /* 传感器阈值区 (22-29, R/W EEPROM, 页面3刷新) */
+    REG_TEMP_HI_X100     = 22,   /**< R/W  温度上限 ×100 (页面3-控件26上半) */
+    REG_TEMP_LO_X100     = 23,   /**< R/W  温度下限 ×100 (页面3-控件26下半) */
+    REG_HUMI_HI_X100     = 24,   /**< R/W  湿度上限 ×100 (页面3-控件27上半) */
+    REG_HUMI_LO_X100     = 25,   /**< R/W  湿度下限 ×100 (页面3-控件27下半) */
+    REG_CO2_HI           = 26,   /**< R/W  CO2上限 ppm   (页面3-控件28上半) */
+    REG_CO2_LO           = 27,   /**< R/W  CO2下限 ppm   (页面3-控件28下半) */
+    REG_NH3_HI_X100      = 28,   /**< R/W  NH3上限 ×100  (页面3-控件29上半) */
+    REG_NH3_LO_X100      = 29,   /**< R/W  NH3下限 ×100  (页面3-控件29下半) */
+
+    REG_COUNT            = 30    /**<       寄存器总数 */
 };
 
 #endif /* BSP_CONFIG_H_ */

@@ -6,6 +6,9 @@
 #include "bsp_config.h"
 #include "app/app_debug.h"
 
+/* ========================== 调试串口实例 (USART2: PD5=TX, PD6=RX) ========================== */
+HardwareSerial DebugSerial(PD6, PD5);   /**< RX, TX */
+
 /**
  * @brief 获取 MCU 96 位唯一 ID 中的 32 位字
  * @param offset_index 偏移索引 (0~2)
