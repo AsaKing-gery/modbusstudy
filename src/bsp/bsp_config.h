@@ -97,6 +97,7 @@ extern HardwareSerial RS485_SERIAL;                 /**< USART1 实例 */
 #define TASK_STACK_MAIN        256
 #define TASK_STACK_HMI         768     /**< 复合帧 vsnprintf + debug 打印 需大栈 */
 #define TASK_STACK_MODBUS_TCP  256
+#define TASK_STACK_LCD          768
 #define TASK_STACK_ESP32       768
 
 #define TASK_PRIO_WATCHDOG     6
@@ -104,6 +105,7 @@ extern HardwareSerial RS485_SERIAL;                 /**< USART1 实例 */
 #define TASK_PRIO_MAIN         3
 #define TASK_PRIO_HMI          4
 #define TASK_PRIO_MODBUS_TCP   2
+#define TASK_PRIO_LCD          3
 #define TASK_PRIO_ESP32        2
 
 /* ========================== Modbus 寄存器地址定义 ========================== */

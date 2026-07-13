@@ -34,6 +34,7 @@
 #include "modbus/modbus_tcp.h"
 #include "modules/hmi.h"
 #include "modules/esp32.h"
+#include "modules/lcd.h"
 
 /* ========================== 系统启动 ========================== */
 
@@ -61,11 +62,12 @@ void setup(void)
     modbus_tcp_init();      /* Stub */
     esp32_init();           /* SPI2 slave + IRQ */
     hmi_init();             /* SoftwareSerial + UART7 pins */
+    /* lcd_init() deferred to lcd_task (after scheduler start) */
 
     TRACE_LN("OK");
 
     /* --- 阶段6: 创建任务 + 启动调度器 --- */
-    xTaskCreate(app_create_tasks, "TaskInit", 128, NULL, 0, NULL);
+    xTaskCreate(app_create_tasks, "TaskInit", 256, NULL, 0, NULL);
     vTaskStartScheduler();
 
     /* 永远不会到达这里 */

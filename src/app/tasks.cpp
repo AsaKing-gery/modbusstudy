@@ -72,9 +72,9 @@ static void task_main(void *pvParameters)
             /* ─── 传感器阈值自动控制 (4路风机 + 4路加湿器) ─── */
             uint16_t status = modbus_reg_get(REG_ESP32_STATUS);
 
-            /* 无条件诊断: 每秒打印一次状态 */
+            /* 诊断心跳: 每30s打印一次状态 */
             static uint32_t last_diag = 0;
-            if (millis() - last_diag >= 5000) {
+            if (millis() - last_diag >= 30000) {
                 last_diag = millis();
                 DEBUG_SERIAL.print("[MAIN.DIAG] status=0x"); DEBUG_SERIAL.print(status, HEX);
                 DEBUG_SERIAL.print(" output=0x"); DEBUG_SERIAL.print(modbus_reg_get(REG_OUTPUT_STATE), HEX);
@@ -159,18 +159,34 @@ void app_create_tasks(void *pvParameters)
 {
     (void)pvParameters;
 
+    DBG("APP", "creating tasks...");
+
+    DEBUG_SERIAL.print("[APP] 1/7 WDT..."); DEBUG_SERIAL.flush();
     xTaskCreate(task_watchdog,     "WDT",   TASK_STACK_WATCHDOG,    NULL, TASK_PRIO_WATCHDOG,    NULL);
+
+    DEBUG_SERIAL.print("[APP] 2/7 ModRTU..."); DEBUG_SERIAL.flush();
     xTaskCreate(modbus_rtu_task,   "ModRTU",TASK_STACK_MODBUS,      NULL, TASK_PRIO_MODBUS,      NULL);
+
+    DEBUG_SERIAL.print("[APP] 3/7 Main..."); DEBUG_SERIAL.flush();
     xTaskCreate(task_main,         "Main",  TASK_STACK_MAIN,        NULL, TASK_PRIO_MAIN,        NULL);
+
+    DEBUG_SERIAL.print("[APP] 4/7 HMI..."); DEBUG_SERIAL.flush();
     xTaskCreate(hmi_task,          "HMI",   TASK_STACK_HMI,         NULL, TASK_PRIO_HMI,         NULL);
+
+    DEBUG_SERIAL.print("[APP] 5/7 ESP32..."); DEBUG_SERIAL.flush();
     xTaskCreate(esp32_task,        "ESP32", TASK_STACK_ESP32,       NULL, TASK_PRIO_ESP32,       NULL);
+
+    DEBUG_SERIAL.print("[APP] 6/7 ModTCP..."); DEBUG_SERIAL.flush();
     xTaskCreate(modbus_tcp_task,   "ModTCP",TASK_STACK_MODBUS_TCP,  NULL, TASK_PRIO_MODBUS_TCP,  NULL);
+
+    DEBUG_SERIAL.print("[APP] 7/7 LCD..."); DEBUG_SERIAL.flush();
+    xTaskCreate(lcd_task,         "LCD",   TASK_STACK_LCD,         NULL, TASK_PRIO_LCD,         NULL);
 
     /* 占位模块 - 按需启用 */
     // xTaskCreate(g4g_task,       "4G",    256, NULL, 2, NULL);
     // xTaskCreate(k210_task,      "K210",   256, NULL, 2, NULL);
-    // xTaskCreate(lcd_task,       "LCD",   512,  NULL, 2, NULL);
 
-    DBG("APP", "tasks created");
+    DEBUG_SERIAL.println("[APP] DONE");
+    DEBUG_SERIAL.flush();
     vTaskDelete(NULL);
 }

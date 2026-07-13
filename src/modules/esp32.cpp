@@ -214,7 +214,7 @@ void esp32_task(void *pvParameters)
         }
 
         /* ─── 诊断心跳 ─── */
-        if (millis() - last_heartbeat >= 5000) {
+        if (millis() - last_heartbeat >= 30000) {
             last_heartbeat = millis();
             uint16_t sr = SPI2->SR;
             bool nss = (GPIOB->IDR & GPIO_PIN_12) != 0;
@@ -228,7 +228,8 @@ void esp32_task(void *pvParameters)
 
         modbus_reg_set(REG_ESP32_STATUS, esp32_status);
 
-        taskYIELD();  /* 立即让出 CPU 给其他任务, 不耽误下次轮询 */
+        /* 有数据时 1ms 轮询, 无数据时 20ms 释放 CPU 给 LCD(prio3) 等任务 */
+        vTaskDelay(pdMS_TO_TICKS((len == ESP32_SPI_FRAME_LEN) ? 1 : 20));
     }
 }
 
