@@ -4,10 +4,13 @@
  */
 
 #include "bsp_config.h"
-#include "app/app_debug.h"
+#include "bsp_debug.h"
 
 /* ========================== 调试串口实例 (USART2: PD5=TX, PD6=RX) ========================== */
 HardwareSerial DebugSerial(PD6, PD5);   /**< RX, TX */
+
+/* ========================== RS485 串口实例 (USART1: PA9=TX, PA10=RX) ========================== */
+HardwareSerial RS485_SERIAL(PIN_RS485_RX, PIN_RS485_TX);
 
 /**
  * @brief 获取 MCU 96 位唯一 ID 中的 32 位字

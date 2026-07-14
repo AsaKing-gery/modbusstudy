@@ -5,7 +5,7 @@
  */
 
 #include "tasks.h"
-#include "app_debug.h"
+#include "bsp/bsp_debug.h"
 #include "drivers/led.h"
 #include "drivers/relay.h"
 #include "modbus/modbus_rtu.h"

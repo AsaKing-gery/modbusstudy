@@ -8,7 +8,7 @@
 
 #include "esp32.h"
 #include "modbus/modbus_core.h"
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
 
 /* ========================== SPI2 HAL 句柄 ========================== */
 static SPI_HandleTypeDef hspi2;

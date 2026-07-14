@@ -25,12 +25,13 @@
 #include <STM32FreeRTOS.h>
 #include "bsp/bsp_config.h"
 #include "bsp/bsp_init.h"
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
 #include "app/param.h"
 #include "app/tasks.h"
 #include "drivers/relay.h"
 #include "drivers/led.h"
 #include "modbus/modbus_rtu.h"
+#include "modbus/modbus_core.h"
 #include "modbus/modbus_tcp.h"
 #include "modules/hmi.h"
 #include "modules/esp32.h"
@@ -54,6 +55,11 @@ void setup(void)
     bsp_gpio_init();
     led_init();
     relay_init();
+
+    /* 依赖注入：注册 modules 层回调（遵循分层架构：app→modules，禁止反向） */
+    g_modbus_output_cb = relay_set_all;
+    g_modbus_param_save_cb = param_save;
+    g_modbus_factory_reset_cb = param_factory_reset;
 
     /* --- 阶段5: 外设初始化 --- */
     TRACE("4");

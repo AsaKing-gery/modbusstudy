@@ -6,15 +6,10 @@
 
 #include "modbus_rtu.h"
 #include "modbus_core.h"
-#include "app/param.h"
-#include "drivers/relay.h"
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
 #include <ModbusSerial.h>
 
 /* ========================== Modbus RTU 实例 ========================== */
-/** RS485 串口硬件实例 (USART1: PA9=TX, PA10=RX) */
-HardwareSerial RS485_SERIAL(PIN_RS485_RX, PIN_RS485_TX);
-
 /** ModbusSerial 构造函数: (串口流, 从站ID, TX使能引脚) */
 static ModbusSerial mb(RS485_SERIAL, 1, PIN_RS485_EN);
 
@@ -134,7 +129,9 @@ void modbus_rtu_task(void *pvParameters)
             /* 输出到继电器 */
             uint16_t output = modbus_reg_get(REG_OUTPUT_STATE);
             if (output != prev_output) {
-                relay_set_all(output & 0xFF);
+                if (g_modbus_output_cb) {
+                    g_modbus_output_cb(output & 0xFF);
+                }
                 prev_output = output;
             }
 

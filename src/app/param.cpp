@@ -6,7 +6,7 @@
 #include "param.h"
 #include <EEPROM.h>
 #include <IWatchdog.h>
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
 #include <stm32f4xx_hal_flash.h>
 
 /* 全局参数单例 */

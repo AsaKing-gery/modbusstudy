@@ -4,7 +4,7 @@
  */
 
 #include "g4g.h"
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
 #include <STM32FreeRTOS.h>
 
 void g4g_init(void)

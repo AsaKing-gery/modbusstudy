@@ -6,8 +6,12 @@
 
 #include "modbus_core.h"
 #include "modbus_rtu.h"
-#include "app/param.h"
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
+
+/* ========================== 回调指针 ========================== */
+modbus_output_cb_t g_modbus_output_cb = NULL;
+modbus_param_save_cb_t g_modbus_param_save_cb = NULL;
+modbus_factory_reset_cb_t g_modbus_factory_reset_cb = NULL;
 
 /* ========================== 全局寄存器表 ========================== */
 static uint16_t g_regs[REG_COUNT];
@@ -98,7 +102,9 @@ void modbus_save_to_param(void)
     g_param.nh3_hi_x100  = g_regs[REG_NH3_HI_X100];
     g_param.nh3_lo_x100  = g_regs[REG_NH3_LO_X100];
 
-    param_save();
+    if (g_modbus_param_save_cb) {
+        g_modbus_param_save_cb();
+    }
 }
 
 void modbus_handle_command(void)
@@ -122,7 +128,9 @@ void modbus_handle_command(void)
         break;
     case CMD_FACTORY_RESET:
         DBG("MODBUS", "factory reset...");
-        param_factory_reset();
+        if (g_modbus_factory_reset_cb) {
+            g_modbus_factory_reset_cb();
+        }
         modbus_load_from_param();
         vTaskDelay(pdMS_TO_TICKS(100));
         NVIC_SystemReset();

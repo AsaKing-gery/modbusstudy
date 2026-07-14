@@ -6,7 +6,6 @@
 #ifndef APP_TASKS_H_
 #define APP_TASKS_H_
 
-#include <Arduino.h>
 #include "bsp/bsp_config.h"
 
 void app_create_tasks(void *pvParameters);

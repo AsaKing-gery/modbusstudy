@@ -8,8 +8,7 @@
 
 #include "hmi.h"
 #include "modbus/modbus_core.h"
-#include "drivers/relay.h"
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
 #include <SoftwareSerial.h>
 #include <stdarg.h>
 #include <FreeRTOS.h>
@@ -17,7 +16,7 @@
 #include <IWatchdog.h>
 
 /* ========================== 串口屏实例 ========================== */
-SoftwareSerial HMISerial(PIN_HMI_RX, PIN_HMI_TX);
+static SoftwareSerial HMISerial(PIN_HMI_RX, PIN_HMI_TX);
 
 /* ========================== 帧协议 ========================== */
 
@@ -65,7 +64,9 @@ static void handle_device_control(uint8_t head, uint8_t value)
         }
     }
     modbus_reg_set(REG_OUTPUT_STATE, state);
-    relay_set_all(state & 0xFF);
+    if (g_modbus_output_cb) {
+        g_modbus_output_cb(state & 0xFF);
+    }
 
     DBG("HMI", "dev 0x" + String(head, HEX) + " ch" + String(bit_idx)
         + "=" + (value ? "ON" : "OFF") + " manual=" + String(g_manual_override));

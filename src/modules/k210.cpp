@@ -4,7 +4,7 @@
  */
 
 #include "k210.h"
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
 #include <STM32FreeRTOS.h>
 
 void k210_init(void)

@@ -5,7 +5,7 @@
  */
 
 #include "modbus_tcp.h"
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
 #include <STM32FreeRTOS.h>
 
 void modbus_tcp_init(void)

@@ -1,20 +1,14 @@
 /**
- * @file    app_debug.h
- * @brief   兼容包装 - 请使用 bsp/bsp_debug.h
- * @deprecated 此文件仅为向后兼容保留，新代码请直接 #include "bsp/bsp_debug.h"
+ * @file    bsp_debug.h
+ * @brief   统一调试输出宏（BSP 层，所有层均可安全引用）
+ * @note    使用裸 Serial.print 避免 String 分配和阻塞问题
  */
 
-#ifndef APP_DEBUG_H_
-#define APP_DEBUG_H_
+#ifndef BSP_DEBUG_H_
+#define BSP_DEBUG_H_
 
-#include "../bsp/bsp_debug.h"
-
-#endif /* APP_DEBUG_H_ */
-
-/* ========================== 原始内容（已迁移至 bsp/bsp_debug.h） ========================== */
-#if 0
 #include <Arduino.h>
-#include "bsp/bsp_config.h"
+#include "bsp_config.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -47,4 +41,5 @@ extern "C" {
 #ifdef __cplusplus
 }
 #endif
-#endif
+
+#endif /* BSP_DEBUG_H_ */

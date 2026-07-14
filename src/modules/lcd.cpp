@@ -6,7 +6,7 @@
  */
 
 #include "lcd.h"
-#include "app/app_debug.h"
+#include "bsp/bsp_debug.h"
 #include "modbus/modbus_core.h"
 #include "hmi.h"
 #include <FreeRTOS.h>
@@ -17,10 +17,10 @@ static pFONT *LCD_AsciiFonts;
 static pFONT *LCD_CHFonts;
 
 /* ========================== 显存缓冲区 ========================== */
-uint16_t LCD_Buff[1024];
+static uint16_t LCD_Buff[1024];
 
 /* ========================== LCD 参数结构体 ========================== */
-struct {
+static struct {
     uint32_t Color;
     uint32_t BackColor;
     uint8_t  ShowNum_Mode;
