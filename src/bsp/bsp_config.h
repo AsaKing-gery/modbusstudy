@@ -150,7 +150,14 @@ enum ModbusRegister
     REG_NH3_HI_X100      = 28,   /**< R/W  NH3上限 ×100  (页面3-控件29上半) */
     REG_NH3_LO_X100      = 29,   /**< R/W  NH3下限 ×100  (页面3-控件29下半) */
 
-    REG_COUNT            = 30    /**<       寄存器总数 */
+    /* --- OTA 固件升级 (地址 30-34) --- */
+    REG_OTA_STATUS       = 30,   /**< R    OTA 状态: 0=空闲 1=检查中 2=下载中 3=成功 4=失败 */
+    REG_OTA_PROGRESS     = 31,   /**< R    OTA 下载进度 0-100 */
+    REG_OTA_ERROR        = 32,   /**< R    OTA 错误码: 0=无 1=网络 2=签名 3=Flash 4=超时 */
+    REG_OTA_VERSION      = 33,   /**< R    当前固件版本号 */
+    REG_OTA_TRIGGER      = 34,   /**< W    写 1 手动触发 OTA 检查 */
+
+    REG_COUNT            = 35    /**<       寄存器总数 */
 };
 
 #endif /* BSP_CONFIG_H_ */

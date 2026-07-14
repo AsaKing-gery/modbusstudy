@@ -16,6 +16,7 @@
 #include "modules/g4g.h"
 #include "modules/k210.h"
 #include "modules/lcd.h"
+#include "app/ota.h"
 #include <IWatchdog.h>
 
 /* ========================== 看门狗任务 ========================== */
@@ -65,6 +66,9 @@ static void task_main(void *pvParameters)
             last_tick = millis();
             led_run_toggle();
             modbus_reg_set(REG_UPTIME, last_tick / 1000);
+
+            /* 同步 OTA 状态到 Modbus 寄存器 */
+            ota_update_modbus_regs();
 
             /* Page3 阈值已写入 g_regs(RAM), 不自动写 EEPROM.
              * 需要持久化时通过 Modbus CMD_SAVE(0x0A) 手动保存 */

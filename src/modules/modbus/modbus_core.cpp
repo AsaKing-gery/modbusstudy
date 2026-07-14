@@ -12,6 +12,7 @@
 modbus_output_cb_t g_modbus_output_cb = NULL;
 modbus_param_save_cb_t g_modbus_param_save_cb = NULL;
 modbus_factory_reset_cb_t g_modbus_factory_reset_cb = NULL;
+modbus_ota_trigger_cb_t g_modbus_ota_trigger_cb = NULL;
 
 /* ========================== 全局寄存器表 ========================== */
 static uint16_t g_regs[REG_COUNT];
@@ -70,6 +71,11 @@ void modbus_load_from_param(void)
     g_regs[REG_CO2_LO]       = g_param.co2_lo;
     g_regs[REG_NH3_HI_X100]  = g_param.nh3_hi_x100;
     g_regs[REG_NH3_LO_X100]  = g_param.nh3_lo_x100;
+    /* OTA 寄存器 */
+    g_regs[REG_OTA_VERSION]  = FIRMWARE_VERSION;
+    g_regs[REG_OTA_STATUS]   = 0;
+    g_regs[REG_OTA_PROGRESS] = 0;
+    g_regs[REG_OTA_ERROR]    = 0;
     /* REG_COMMAND, REG_UPTIME, REG_OUTPUT_STATE 为运行时值 */
 }
 

@@ -39,6 +39,10 @@ extern modbus_param_save_cb_t g_modbus_param_save_cb;
 typedef void (*modbus_factory_reset_cb_t)(void);
 extern modbus_factory_reset_cb_t g_modbus_factory_reset_cb;
 
+/** OTA 触发回调：app 层注册 ota_trigger */
+typedef void (*modbus_ota_trigger_cb_t)(void);
+extern modbus_ota_trigger_cb_t g_modbus_ota_trigger_cb;
+
 /* ========================== 互斥锁 ========================== */
 extern SemaphoreHandle_t g_rs485_mutex;
 

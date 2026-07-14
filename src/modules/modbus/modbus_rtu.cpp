@@ -83,6 +83,9 @@ static void sync_registers_from_mb(void)
 
     new_val = mb.Hreg(REG_THRESHOLD_D);
     if (new_val != modbus_reg_get(REG_THRESHOLD_D)) modbus_reg_set(REG_THRESHOLD_D, new_val);
+
+    new_val = mb.Hreg(REG_OTA_TRIGGER);
+    if (new_val != modbus_reg_get(REG_OTA_TRIGGER)) modbus_reg_set(REG_OTA_TRIGGER, new_val);
 }
 
 /* ========================== 从共享表同步到 ModbusSerial ========================== */
@@ -133,6 +136,15 @@ void modbus_rtu_task(void *pvParameters)
                     g_modbus_output_cb(output & 0xFF);
                 }
                 prev_output = output;
+            }
+
+            /* OTA 触发 */
+            uint16_t ota_trigger = modbus_reg_get(REG_OTA_TRIGGER);
+            if (ota_trigger == 1) {
+                modbus_reg_set(REG_OTA_TRIGGER, 0);
+                if (g_modbus_ota_trigger_cb) {
+                    g_modbus_ota_trigger_cb();
+                }
             }
 
             /* 处理命令 */

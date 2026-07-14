@@ -14,7 +14,8 @@
 static SPI_HandleTypeDef hspi2;
 
 /* ========================== 接收缓冲区 ========================== */
-static uint8_t  spi_rx_buf[ESP32_SPI_FRAME_LEN];   /**< 从 ESP32 收到的原始帧 */
+static uint8_t  spi_rx_buf[ESP32_SPI_FRAME_LEN];   /**< 从 ESP32 收到的原始传感器帧 */
+static uint8_t  ota_rx_buf[ESP32_OTA_FRAME_MAX];   /**< OTA 帧接收缓冲区 */
 
 /* ========================== 运行状态 ========================== */
 static volatile uint16_t esp32_status = 0;
@@ -22,6 +23,13 @@ static volatile uint8_t  spi_crc_errors = 0;
 
 /* ========================== 解析后的传感器数据 ========================== */
 static Esp32SensorData g_esp32_data;
+
+/* ========================== OTA 回调指针 ========================== */
+esp32_ota_frame_cb_t g_esp32_ota_frame_cb = NULL;
+
+/* ========================== MISO 响应（STM32→ESP32 命令） ========================== */
+static volatile uint8_t g_miso_cmd = ESP32_CMD_IDLE;  /**< 待发送到 ESP32 的命令字节 */
+static volatile uint8_t g_miso_pending = 1;             /**< 待发送标志 */
 
 /* ========================== GPIO 初始化 ========================== */
 static void esp32_gpio_init(void)
@@ -129,20 +137,29 @@ void esp32_init(void)
  *        不依赖 HAL 中断, 在 FreeRTOS 任务中安全调用
  * @return 收到的字节数
  */
-static uint8_t spi_poll_rx_frame(uint8_t *buf, uint8_t max_len)
+static uint16_t spi_poll_rx_frame(uint8_t *buf, uint16_t max_len)
 {
     /* 快速检测 NSS: 只检查一次, 不阻塞 */
     if (GPIOB->IDR & GPIO_PIN_12) {
         return 0;  /* NSS 高, 主站未选中, 立即返回 */
     }
 
-    uint8_t count = 0;
+    uint16_t count = 0;
 
     /* 清 OVR (上次可能残留) */
     if (SPI2->SR & SPI_SR_OVR) {
         volatile uint8_t dummy = SPI2->DR;
         (void)dummy;
         __HAL_SPI_CLEAR_OVRFLAG(&hspi2);
+    }
+
+    /* 预加载 MISO 响应字节（告诉 ESP32 当前命令） */
+    if (g_miso_pending) {
+        /* 写 DR 前检查 TXE（发送缓冲区空） */
+        if (SPI2->SR & SPI_SR_TXE) {
+            *(volatile uint8_t*)&SPI2->DR = g_miso_cmd;
+            g_miso_pending = 0;
+        }
     }
 
     /* NSS 低电平期间逐个接收字节 */
@@ -156,11 +173,51 @@ static uint8_t spi_poll_rx_frame(uint8_t *buf, uint8_t max_len)
 
         buf[count++] = (uint8_t)(SPI2->DR);
 
+        /* 收到一个字节后，预加载下一个 MISO 响应（保持命令持续） */
+        if (SPI2->SR & SPI_SR_TXE) {
+            *(volatile uint8_t*)&SPI2->DR = g_miso_cmd;
+        }
+
         /* NSS 恢复高电平 → 帧结束 */
         if (GPIOB->IDR & GPIO_PIN_12) break;
     }
 
     return count;
+}
+
+/* ========================== OTA 帧校验 ========================== */
+
+/** 计算 OTA 帧的校验和 (从 byte[2] 到倒数第2字节) */
+static uint8_t ota_checksum(const uint8_t *frame, uint16_t len)
+{
+    uint8_t sum = 0;
+    for (uint16_t i = 2; i < len - 1; i++) {
+        sum += frame[i];
+    }
+    return sum;
+}
+
+/** 检查是否为 OTA 帧并分发到回调 */
+static bool esp32_handle_ota_frame(const uint8_t *frame, uint16_t len)
+{
+    if (len < 6) return false;  /* 最小帧: 2hdr+1type+2data+1crc */
+
+    uint8_t type = frame[2];
+
+    /* 校验 CRC */
+    if (frame[len - 1] != ota_checksum(frame, len)) {
+        spi_crc_errors++;
+        DBG("ESP32", "OTA CRC error");
+        return false;
+    }
+
+    /* 分发到回调 */
+    if (g_esp32_ota_frame_cb) {
+        g_esp32_ota_frame_cb(type, frame, len);
+    }
+
+    DBG_FMT("ESP32", "OTA frame type=0x%02X len=%d", type, len);
+    return true;
 }
 
 /* ========================== 任务 ========================== */
@@ -175,41 +232,31 @@ void esp32_task(void *pvParameters)
     uint32_t frame_count = 0;
 
     while (true) {
-        /* ─── 轮询收帧 ─── */
-        uint8_t len = spi_poll_rx_frame(spi_rx_buf, ESP32_SPI_FRAME_LEN);
+        /* ─── 轮询收帧 (大缓冲, 支持 OTA 可变长度) ─── */
+        uint16_t len = spi_poll_rx_frame(ota_rx_buf, ESP32_OTA_FRAME_MAX);
 
-        if (len == ESP32_SPI_FRAME_LEN) {
-            frame_count++;
+        if (len >= 3) {
+            uint8_t type = ota_rx_buf[2];
+            bool is_ota = (type == ESP32_FRAME_OTA_HANDSHAKE
+                        || type == ESP32_FRAME_OTA_DATA
+                        || type == ESP32_FRAME_OTA_RESULT);
 
-            DEBUG_SERIAL.print("[ESP32.RX] HEX: ");
-            for (int i = 0; i < len; i++) {
-                if (spi_rx_buf[i] < 0x10) DEBUG_SERIAL.print('0');
-                DEBUG_SERIAL.print(spi_rx_buf[i], HEX);
-                DEBUG_SERIAL.print(' ');
-            }
-            DEBUG_SERIAL.println();
-            DEBUG_SERIAL.flush();
+            if (is_ota) {
+                /* OTA 帧处理 */
+                esp32_handle_ota_frame(ota_rx_buf, len);
+            } else if (len == ESP32_SPI_FRAME_LEN && type == ESP32_FRAME_SENSOR) {
+                /* 传感器帧: 复制到传感器专用缓冲并解析 */
+                memcpy(spi_rx_buf, ota_rx_buf, ESP32_SPI_FRAME_LEN);
+                frame_count++;
 
-            if (esp32_parse_frame(spi_rx_buf)) {
-                esp32_status |= 0x02;  /* 标记收到有效帧 */
-                modbus_reg_set(REG_TEMP_X100,  (uint16_t)g_esp32_data.temp_x100);
-                modbus_reg_set(REG_HUMI_X100,  (uint16_t)g_esp32_data.humi_x100);
-                modbus_reg_set(REG_CO2,        (uint16_t)g_esp32_data.co2);
-                modbus_reg_set(REG_NH3_X100,   (uint16_t)g_esp32_data.nh3_x100);
-                modbus_reg_set(REG_LUX_X100,   (uint16_t)g_esp32_data.lux_x100);
-
-                DEBUG_SERIAL.print("[ESP32] T="); DEBUG_SERIAL.print(g_esp32_data.temp_x100 / 100);
-                DEBUG_SERIAL.print("."); DEBUG_SERIAL.print(abs(g_esp32_data.temp_x100) % 100);
-                DEBUG_SERIAL.print(" H="); DEBUG_SERIAL.print(g_esp32_data.humi_x100 / 100);
-                DEBUG_SERIAL.print("."); DEBUG_SERIAL.print(abs(g_esp32_data.humi_x100) % 100);
-                DEBUG_SERIAL.print(" CO2="); DEBUG_SERIAL.print(g_esp32_data.co2);
-                DEBUG_SERIAL.print(" NH3="); DEBUG_SERIAL.print(g_esp32_data.nh3_x100 / 100);
-                DEBUG_SERIAL.print("."); DEBUG_SERIAL.print(abs(g_esp32_data.nh3_x100) % 100);
-                DEBUG_SERIAL.println();
-                DEBUG_SERIAL.flush();
-            } else {
-                DEBUG_SERIAL.println("[ESP32.RX] frame parse FAILED");
-                DEBUG_SERIAL.flush();
+                if (esp32_parse_frame(spi_rx_buf)) {
+                    esp32_status |= 0x02;  /* 标记收到有效帧 */
+                    modbus_reg_set(REG_TEMP_X100,  (uint16_t)g_esp32_data.temp_x100);
+                    modbus_reg_set(REG_HUMI_X100,  (uint16_t)g_esp32_data.humi_x100);
+                    modbus_reg_set(REG_CO2,        (uint16_t)g_esp32_data.co2);
+                    modbus_reg_set(REG_NH3_X100,   (uint16_t)g_esp32_data.nh3_x100);
+                    modbus_reg_set(REG_LUX_X100,   (uint16_t)g_esp32_data.lux_x100);
+                }
             }
         }
 
@@ -228,8 +275,8 @@ void esp32_task(void *pvParameters)
 
         modbus_reg_set(REG_ESP32_STATUS, esp32_status);
 
-        /* 有数据时 1ms 轮询, 无数据时 20ms 释放 CPU 给 LCD(prio3) 等任务 */
-        vTaskDelay(pdMS_TO_TICKS((len == ESP32_SPI_FRAME_LEN) ? 1 : 20));
+        /* 有数据时 1ms 轮询, 无数据时 20ms 释放 CPU */
+        vTaskDelay(pdMS_TO_TICKS((len >= 3) ? 1 : 20));
     }
 }
 
@@ -244,5 +291,16 @@ void esp32_get_data(Esp32SensorData *out)
 {
     if (out) {
         memcpy(out, &g_esp32_data, sizeof(Esp32SensorData));
+    }
+}
+
+void esp32_set_miso_cmd(uint8_t cmd)
+{
+    g_miso_cmd = cmd;
+    g_miso_pending = 1;
+    /* 预加载到 DR（如果 TXE 已经就绪） */
+    if (SPI2->SR & SPI_SR_TXE) {
+        *(volatile uint8_t*)&SPI2->DR = cmd;
+        g_miso_pending = 0;
     }
 }

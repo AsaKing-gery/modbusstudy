@@ -36,11 +36,15 @@
 #include "modules/hmi.h"
 #include "modules/esp32.h"
 #include "modules/lcd.h"
+#include "app/ota.h"
 
 /* ========================== 系统启动 ========================== */
 
 void setup(void)
 {
+    /* --- 阶段0: 向量表重定位 (APP 运行在 0x08020000) --- */
+    SCB->VTOR = 0x08020000;
+
     /* --- 阶段1: 调试串口 --- */
     DEBUG_SERIAL.begin(DEBUG_BAUDRATE);
     TRACE_LN("\n\nSystem Version:" FIRMWARE_VERSION_STR "  Livestock Patrol System Start...");
@@ -60,6 +64,7 @@ void setup(void)
     g_modbus_output_cb = relay_set_all;
     g_modbus_param_save_cb = param_save;
     g_modbus_factory_reset_cb = param_factory_reset;
+    g_modbus_ota_trigger_cb = ota_trigger;
 
     /* --- 阶段5: 外设初始化 --- */
     TRACE("4");
@@ -69,6 +74,20 @@ void setup(void)
     esp32_init();           /* SPI2 slave + IRQ */
     hmi_init();             /* SoftwareSerial + UART7 pins */
     /* lcd_init() deferred to lcd_task (after scheduler start) */
+
+    /* --- 阶段6: 注册 OTA SPI 回调 --- */
+    TRACE("OTA");
+    ota_register_spi_callback();
+    TRACE_LN("OK");
+
+    /* --- 阶段6b: 上电自动检查 OTA 更新 --- */
+    /* 通过 ESP32 SPI 检查服务器最新版本
+     * 注意: 此时 IWDG 已启动 (30s)，自动检查必须在此超时前完成
+     * 若无更新 ESP32 快速响应，若有更新则下载期间 WDT 任务会喂狗 */
+    ota_check_version();
+
+    /* --- 阶段7: 确认启动成功 (必须在 IWDG 30s 超时前调用) --- */
+    ota_confirm_success();
 
     TRACE_LN("OK");
 
