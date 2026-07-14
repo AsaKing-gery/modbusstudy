@@ -80,6 +80,7 @@ void LCD_DisplayString(uint16_t x, uint16_t y, const char *p);
 void LCD_SetTextFont(pFONT *fonts);
 void LCD_DisplayChinese(uint16_t x, uint16_t y, const char *pText);
 void LCD_DisplayText(uint16_t x, uint16_t y, const char *pText);
+void LCD_DisplayChineseGB(uint16_t x, uint16_t y, const uint8_t *gb_str, uint8_t byte_len);
 
 /* 数字/小数 */
 void LCD_ShowNumMode(uint8_t mode);

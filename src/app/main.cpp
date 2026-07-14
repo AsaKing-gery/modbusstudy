@@ -1,6 +1,6 @@
 /**
  * @file    main.cpp
- * @brief   系统入口 - 远程 I/O 主站 v4.05.01
+ * @brief   系统入口 - 畜畜养殖巡检系统 v4.05.01
  * @note    STM32F407VET6 / FreeRTOS / Arduino 框架
  *
  * 硬件接线清单:
@@ -42,7 +42,7 @@ void setup(void)
 {
     /* --- 阶段1: 调试串口 --- */
     DEBUG_SERIAL.begin(DEBUG_BAUDRATE);
-    TRACE_LN("\n\nSystem Version:" FIRMWARE_VERSION_STR "  Remote IO Start...");
+    TRACE_LN("\n\nSystem Version:" FIRMWARE_VERSION_STR "  Livestock Patrol System Start...");
 
     /* --- 阶段2: 系统信息 --- */
     bsp_show_system_info();
