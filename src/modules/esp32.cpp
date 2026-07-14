@@ -28,8 +28,10 @@ static Esp32SensorData g_esp32_data;
 esp32_ota_frame_cb_t g_esp32_ota_frame_cb = NULL;
 
 /* ========================== MISO 响应（STM32→ESP32 命令） ========================== */
-static volatile uint8_t g_miso_cmd = ESP32_CMD_IDLE;  /**< 待发送到 ESP32 的命令字节 */
-static volatile uint8_t g_miso_pending = 1;             /**< 待发送标志 */
+static volatile uint8_t  g_miso_cmd     = ESP32_CMD_IDLE;  /**< 待发送到 ESP32 的命令字节 */
+static volatile uint8_t  g_miso_pending = 1;                /**< 待发送标志 */
+static volatile uint32_t g_miso_cmd_set_ms = 0;             /**< 命令设置时刻 (HAL_GetTick) */
+#define MISO_CMD_TIMEOUT_MS  5000                           /**< 命令自动清除超时 (5秒) */
 
 /* ========================== GPIO 初始化 ========================== */
 static void esp32_gpio_init(void)
@@ -232,6 +234,18 @@ void esp32_task(void *pvParameters)
     uint32_t frame_count = 0;
 
     while (true) {
+        /* 自动清除超时的 MISO 命令 (不依赖 NSS, 始终执行) */
+        if (g_miso_cmd != ESP32_CMD_IDLE) {
+            if (HAL_GetTick() - g_miso_cmd_set_ms > MISO_CMD_TIMEOUT_MS) {
+                g_miso_cmd = ESP32_CMD_IDLE;
+                g_miso_pending = 1;
+                if (SPI2->SR & SPI_SR_TXE) {
+                    *(volatile uint8_t*)&SPI2->DR = ESP32_CMD_IDLE;  /* 立即写入DR覆盖旧值 */
+                }
+                DBG("ESP32", "MISO cmd timeout, cleared to IDLE");
+            }
+        }
+
         /* ─── 轮询收帧 (大缓冲, 支持 OTA 可变长度) ─── */
         uint16_t len = spi_poll_rx_frame(ota_rx_buf, ESP32_OTA_FRAME_MAX);
 
@@ -275,8 +289,12 @@ void esp32_task(void *pvParameters)
 
         modbus_reg_set(REG_ESP32_STATUS, esp32_status);
 
-        /* 有数据时 1ms 轮询, 无数据时 20ms 释放 CPU */
-        vTaskDelay(pdMS_TO_TICKS((len >= 3) ? 1 : 20));
+        /* 有数据/MISO命令活跃时 1ms 轮询, 无数据时 20ms 释放 CPU */
+        uint32_t delay_ms = (len >= 3) ? 1 : 20;
+        if (g_miso_cmd != ESP32_CMD_IDLE) {
+            delay_ms = 1;  /* MISO 命令活跃 → 加速轮询以捕获 ESP32 响应帧 */
+        }
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }
 }
 
@@ -298,9 +316,19 @@ void esp32_set_miso_cmd(uint8_t cmd)
 {
     g_miso_cmd = cmd;
     g_miso_pending = 1;
+    g_miso_cmd_set_ms = HAL_GetTick();  /* 记录时间戳，用于超时自动清除 */
     /* 预加载到 DR（如果 TXE 已经就绪） */
     if (SPI2->SR & SPI_SR_TXE) {
         *(volatile uint8_t*)&SPI2->DR = cmd;
         g_miso_pending = 0;
+    }
+}
+
+void esp32_clear_miso_cmd(void)
+{
+    g_miso_cmd = ESP32_CMD_IDLE;
+    g_miso_pending = 1;
+    if (SPI2->SR & SPI_SR_TXE) {
+        *(volatile uint8_t*)&SPI2->DR = ESP32_CMD_IDLE;  /* 立即写入DR覆盖旧值 */
     }
 }

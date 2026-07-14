@@ -19,6 +19,10 @@ static uint8_t     ota_progress   = 0;
 static OtaError_t  ota_error      = OTA_ERR_NONE;
 static bool        ota_confirmed  = false;
 
+/* OTA 检查超时：检查/下载有 60 秒完成窗口 */
+static uint32_t    ota_check_start_ms = 0;
+#define OTA_CHECK_TIMEOUT_MS   60000
+
 /* 当前 OTA 下载上下文 */
 static uint32_t    ota_new_version  = 0;
 static uint32_t    ota_file_size    = 0;
@@ -245,16 +249,26 @@ static void ota_handle_data(const uint8_t *data, uint16_t len)
 /** 处理 OTA 结果帧 (0xF2) */
 static void ota_handle_result(const uint8_t *data, uint16_t len)
 {
+    uint8_t status = 0xFF;
+
     if (len < OTA_RESULT_LEN) {
         ota_error = OTA_ERR_SIGNATURE;
         ota_status = OTA_FAILED;
-        return;
+        goto cleanup;
     }
 
-    uint8_t status = data[OTA_RES_OFF_STATUS];
+    status = data[OTA_RES_OFF_STATUS];
+
+    if (ota_status == OTA_CHECKING && status == 0x00) {
+        /* 版本检查完成: 服务器版本 <= 当前, 无需更新 */
+        DBG("OTA", "Version check: no update needed");
+        ota_status = OTA_IDLE;
+        ota_check_start_ms = 0;
+        goto cleanup;
+    }
 
     if (status == 0x00) {
-        /* ESP32 发送完成 */
+        /* 下载完成: OTA_DOWNLOADING 状态下收到成功结果 */
         ota_status = OTA_SUCCESS;
         ota_progress = 100;
         DBG("OTA", "Download complete! Rebooting...");
@@ -263,12 +277,18 @@ static void ota_handle_result(const uint8_t *data, uint16_t len)
         for (volatile int i = 0; i < 1000000; i++) { __NOP(); }
 
         NVIC_SystemReset();
+        return;  /* 不会执行到这里 */
     } else {
-        /* ESP32 发送失败 */
+        /* 下载失败 */
         ota_error = OTA_ERR_SIGNATURE;
         ota_status = OTA_FAILED;
         DBG_FMT("OTA", "ESP32 reported error: 0x%02X", status);
+        goto cleanup;
     }
+
+cleanup:
+    esp32_clear_miso_cmd();
+    ota_progress = 0;
 }
 
 /** SPI OTA 帧回调入口 */
@@ -316,6 +336,7 @@ void ota_trigger(void)
     ota_status  = OTA_CHECKING;
     ota_error   = OTA_ERR_NONE;
     ota_progress = 0;
+    ota_check_start_ms = HAL_GetTick();  /* 记录检查开始时间 */
 
     /* 通过 SPI MISO 通知 ESP32 开始 OTA 流程 */
     esp32_set_miso_cmd(ESP32_CMD_OTA_START);
@@ -352,6 +373,7 @@ void ota_check_version(void)
     /* 通过 SPI 通知 ESP32 检查版本 */
     esp32_set_miso_cmd(ESP32_CMD_OTA_START);
     ota_status = OTA_CHECKING;
+    ota_check_start_ms = HAL_GetTick();  /* 记录检查开始时间 */
     DBG("OTA", "Auto-check triggered");
 }
 
@@ -359,6 +381,17 @@ void ota_check_version(void)
 
 void ota_update_modbus_regs(void)
 {
+    /* OTA 检查/下载超时恢复：60 秒无进展 → 回到 IDLE 并清除 MISO 命令 */
+    if (ota_status == OTA_CHECKING && ota_check_start_ms != 0) {
+        if (HAL_GetTick() - ota_check_start_ms > OTA_CHECK_TIMEOUT_MS) {
+            DBG("OTA", "Check timeout, resetting to IDLE");
+            ota_status = OTA_IDLE;
+            ota_error = OTA_ERR_NONE;
+            ota_check_start_ms = 0;
+            esp32_clear_miso_cmd();
+        }
+    }
+
     modbus_reg_set(REG_OTA_STATUS,   (uint16_t)ota_status);
     modbus_reg_set(REG_OTA_PROGRESS, (uint16_t)ota_progress);
     modbus_reg_set(REG_OTA_ERROR,    (uint16_t)ota_error);

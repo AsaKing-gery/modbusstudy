@@ -52,6 +52,9 @@ extern esp32_ota_frame_cb_t g_esp32_ota_frame_cb;
 /** 设置 MISO 响应字节（ESP32 下次 SPI 传输时收到） */
 void esp32_set_miso_cmd(uint8_t cmd);
 
+/** 清除 MISO 命令（恢复空闲状态） */
+void esp32_clear_miso_cmd(void);
+
 /* ========================== API ========================== */
 void     esp32_init(void);
 void     esp32_task(void *pvParameters);
