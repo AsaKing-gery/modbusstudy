@@ -1,0 +1,31 @@
+set pagination off
+target extended-remote :3333
+monitor reset halt
+echo ===SPI2 Regs===\n
+monitor mdw 0x40003800 1
+monitor mdw 0x40003804 1
+monitor mdw 0x40003808 1
+echo ===DMA1_S3 CR/NDTR===\n
+monitor mdw 0x40026058 1
+monitor mdw 0x4002605C 1
+echo ===DMA_RX_BUF first 16===\n
+x/16xb 0x20000e8e
+echo ===rx_buf first 8===\n
+x/8xb 0x20000916
+echo ===rx_len===\n
+x/1xh 0x20000914
+echo ===rx_frame_total===\n
+x/1xh 0x20000912
+echo ===rx_frame_ok===\n
+x/1xh 0x20000910
+echo ===g_dma_prev_ndtr===\n
+x/1xh 0x200008d6
+echo ===EXTI Regs===\n
+monitor mdw 0x40013C00 1
+monitor mdw 0x40013C08 1
+monitor mdw 0x40013C0C 1
+echo ===SYSCFG EXTICR3===\n
+monitor mdw 0x40013810 1
+echo ===Done===\n
+detach
+quit

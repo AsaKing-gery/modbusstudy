@@ -1,334 +1,636 @@
 /**
  * @file    esp32.cpp
- * @brief   ESP32 SPI 从机驱动 (SPI2, 1MHz MODE0, 硬件 NSS)
- * @note    STM32 作为 SPI Slave，通过轮询 SPI2->SR 接收 ESP32 Master 的 14 字节传感器帧
- *          协议: [0xAA][0x55][0x01][temp:2BE][humi:2BE][co2:2BE][nh3:2BE][lux:2BE][crc8]
- *          不依赖 HAL 中断回调（中断在 FreeRTOS 下时序不可靠），改用轮询 RXNE
+ * @brief   ESP32 SPI 从机通信模块 (STM32侧) — 工业级握手协议
+ *
+ * @note    SPI2 从机模式, DMA 循环模式接收 (DMA1_Stream3 Ch0 RX, DMA1_Stream4 Ch0 TX)
+ *          SPI2: SCK=PB13, MISO=PB14, MOSI=PB15, NSS=PB12 (AF5)
+ *          模式: 从机, 1MHz, CPOL=0/CPHA=0 (MODE0), MSB first, 8bit
+ *          FIFO 使能 (4级), 降低过载风险
+ *
+ * 帧检测:
+ *   NSS 下降沿 → 标记帧开始
+ *   DMA 循环模式自动将数据写入环缓冲
+ *   NSS 上升沿 → 读 NDTR 计算帧长, 拷贝到线缓冲, FreeRTOS 通知任务处理
+ *
+ * 握手流程:
+ *   1. STM32 启动 → HS_INIT, 等待 ESP32 的 HANDSHAKE_REQ
+ *   2. 收到 HANDSHAKE_REQ → HS_RESPONSE, MISO 循环输出 9B 响应帧
+ *   3. 收到 HANDSHAKE_ACK → HS_READY, 正常数据交换
+ *   4. 定时检测心跳超时 → HS_INIT (重新等待握手)
  */
 
-#include "esp32.h"
-#include "modbus/modbus_core.h"
+#include "modules/esp32.h"
+#include "app/ota.h"
+#include "modbus/modbus_rtu.h"
 #include "bsp/bsp_debug.h"
+#include "stm32f4xx_hal.h"
 
-/* ========================== SPI2 HAL 句柄 ========================== */
-static SPI_HandleTypeDef hspi2;
+/* ========================== 硬件配置 ========================== */
+#define ESP_SPI             SPI2
+#define ESP_SPI_AF          GPIO_AF5_SPI2
+#define ESP_SPI_PORT        GPIOB
+#define ESP_PIN_SCK         GPIO_PIN_13
+#define ESP_PIN_MISO        GPIO_PIN_14
+#define ESP_PIN_MOSI        GPIO_PIN_15
+#define ESP_PIN_NSS         GPIO_PIN_12
+#define ESP_PIN_NSS_PIN     PB12              /* Arduino 引脚号 (attachInterrupt 用) */
 
-/* ========================== 接收缓冲区 ========================== */
-static uint8_t  spi_rx_buf[ESP32_SPI_FRAME_LEN];   /**< 从 ESP32 收到的原始传感器帧 */
-static uint8_t  ota_rx_buf[ESP32_OTA_FRAME_MAX];   /**< OTA 帧接收缓冲区 */
+/* 传感器帧 */
+#define SENSOR_FRAME_LEN    14
+#define SENSOR_HEADER0      0xAA
+#define SENSOR_HEADER1      0x55
+#define SENSOR_TYPE         0x01
+#define SENSOR_PAYLOAD_OFF  2
+#define SENSOR_PAYLOAD_LEN  11
 
-/* ========================== 运行状态 ========================== */
-static volatile uint16_t esp32_status = 0;
-static volatile uint8_t  spi_crc_errors = 0;
+/* 接收缓冲 */
+#define RX_BUF_LEN          700             /* 最大OTA帧 700B */
 
-/* ========================== 解析后的传感器数据 ========================== */
-static Esp32SensorData g_esp32_data;
+/* ========================== 模块变量 ========================== */
+static SPI_HandleTypeDef g_spi;
+static volatile uint8_t  g_miso_cmd = ESP32_CMD_IDLE;
+static uint32_t          g_miso_cmd_set_ms;
 
-/* ========================== OTA 回调指针 ========================== */
+/* DMA 环缓冲 (循环模式, 始终运行) */
+static uint8_t  g_dma_rx_buf[RX_BUF_LEN];  /* RX DMA 环缓冲 */
+static uint8_t  g_dma_tx_buf[RX_BUF_LEN];  /* TX DMA 环缓冲 (MISO 数据) */
+
+/* 环形帧队列 (4槽, ISR入队/任务出队, 防止帧覆盖丢失) */
+#define RX_Q_SIZE      4
+static uint8_t  rx_q_buf[RX_Q_SIZE][RX_BUF_LEN];
+static uint16_t rx_q_len[RX_Q_SIZE];
+static volatile uint8_t rx_q_wr;   /* ISR 写入索引 */
+static uint8_t          rx_q_rd;   /* 任务读取索引 */
+
+/* SPI 诊断计数 */
+static uint16_t rx_frame_total;
+static uint16_t rx_frame_ok;       /* CRC校验通过数 */
+static uint16_t rx_frame_bad_crc;  /* 帧头找到但CRC失败数 */
+static uint16_t rx_frame_bad_type; /* 未知帧类型数 */
+static uint8_t  rx_last_type;      /* 最近一次通过的帧类型 (诊断) */
+
+/* 传感器数据 */
+static Esp32SensorData g_sensor;
+static uint16_t        g_status;
+
+/* OTA 帧回调 (由 ota.cpp 注入) */
 esp32_ota_frame_cb_t g_esp32_ota_frame_cb = NULL;
 
-/* ========================== MISO 响应（STM32→ESP32 命令） ========================== */
-static volatile uint8_t  g_miso_cmd     = ESP32_CMD_IDLE;  /**< 待发送到 ESP32 的命令字节 */
-static volatile uint8_t  g_miso_pending = 1;                /**< 待发送标志 */
-static volatile uint32_t g_miso_cmd_set_ms = 0;             /**< 命令设置时刻 (HAL_GetTick) */
-#define MISO_CMD_TIMEOUT_MS  5000                           /**< 命令自动清除超时 (5秒) */
+/* ========================== 握手状态机 ========================== */
+static Esp32HsState_t g_hs_state = HS_INIT;
+static uint32_t       g_hs_state_enter_ms;   /* 进入当前状态的时间 */
+static uint8_t        g_hs_boot_status = BOOT_STATUS_NORMAL;
+static uint32_t       g_hs_last_heartbeat_ms; /* 上次收到心跳的时间 */
 
-/* ========================== GPIO 初始化 ========================== */
-static void esp32_gpio_init(void)
+/* MISO 握手响应缓冲区 (9字节循环输出) */
+static uint8_t  g_hs_resp_buf[ESP32_HS_RESP_LEN];
+static uint8_t  g_hs_resp_idx;
+static bool     g_hs_resp_active;
+
+/* ========================== DMA/EXTI 帧检测变量 ========================== */
+static volatile uint16_t g_dma_prev_ndtr;   /* 上次 NSS 上升沿的 NDTR */
+static volatile bool     g_spi_frame_ready; /* 帧就绪标志 (ISR→任务) */
+static volatile bool     g_spi_active;      /* NSS 低电平 = SPI 传输中 */
+
+/* Task handle for notification */
+static TaskHandle_t g_esp32_task_handle = NULL;
+
+/* ========================== 前向声明 ========================== */
+static void     process_frame(uint8_t *buf, uint16_t len);
+static uint8_t  get_miso_byte(void);
+static void     hs_build_resp(void);
+static void     miso_dma_refill(void);
+static void     nss_isr_callback(void);
+
+/* ========================== 辅助 ========================== */
+static uint8_t crc8_sum(const uint8_t *data, uint16_t len)
 {
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-
-    GPIO_InitTypeDef gpio = {0};
-    gpio.Mode      = GPIO_MODE_AF_PP;
-    gpio.Pull      = GPIO_NOPULL;
-    gpio.Speed     = GPIO_SPEED_FREQ_HIGH;
-    gpio.Alternate = ESP32_SPI_AF;           /* GPIO_AF5_SPI2 */
-
-    /* PB13=SCK, PB14=MISO, PB15=MOSI */
-    gpio.Pin = GPIO_PIN_13 | GPIO_PIN_14 | GPIO_PIN_15;
-    HAL_GPIO_Init(GPIOB, &gpio);
-
-    /* PB12=NSS (硬件 NSS, 上拉防止误触发) */
-    gpio.Pin  = GPIO_PIN_12;
-    gpio.Pull = GPIO_PULLUP;
-    HAL_GPIO_Init(GPIOB, &gpio);
+    uint16_t sum = 0;
+    for (uint16_t i = 0; i < len; i++) sum += data[i];
+    return sum & 0xFF;
 }
 
-/* ========================== 帧处理 ========================== */
+/* ========================== MISO DMA TX 缓冲填充 ========================== */
 
-static inline int16_t be16_to_i16(const uint8_t *buf)
+/** 用当前 MISO 字节模式重新填充 TX DMA 环缓冲 (700字节) */
+static void miso_dma_refill(void)
 {
-    return (int16_t)(((uint16_t)buf[0] << 8) | buf[1]);
-}
-
-static uint8_t calc_checksum(const uint8_t *frame)
-{
-    uint8_t sum = 0;
-    for (int i = 2; i < 13; i++) {
-        sum += frame[i];
-    }
-    return sum;
-}
-
-static bool esp32_parse_frame(const uint8_t *frame)
-{
-    if (frame[0] != ESP32_FRAME_HEADER0 || frame[1] != ESP32_FRAME_HEADER1) {
-        DBG("ESP32", "frame header mismatch: "
-            + String(frame[0], HEX) + " " + String(frame[1], HEX));
-        return false;
-    }
-
-    if (frame[13] != calc_checksum(frame)) {
-        spi_crc_errors++;
-        return false;
-    }
-
-    g_esp32_data.temp_x100 = be16_to_i16(&frame[3]);
-    g_esp32_data.humi_x100 = be16_to_i16(&frame[5]);
-    g_esp32_data.co2       = be16_to_i16(&frame[7]);
-    g_esp32_data.nh3_x100  = be16_to_i16(&frame[9]);
-    g_esp32_data.lux_x100  = be16_to_i16(&frame[11]);
-    g_esp32_data.valid     = true;
-    g_esp32_data.update_ms = millis();
-
-    return true;
-}
-
-/* ========================== 初始化 ========================== */
-
-void esp32_init(void)
-{
-    TRACE("E");
-
-    memset(&g_esp32_data, 0, sizeof(g_esp32_data));
-
-    esp32_gpio_init();
-
-    __HAL_RCC_SPI2_CLK_ENABLE();
-
-    hspi2.Instance               = SPI2;
-    hspi2.Init.Mode              = SPI_MODE_SLAVE;
-    hspi2.Init.Direction         = SPI_DIRECTION_2LINES;
-    hspi2.Init.DataSize          = SPI_DATASIZE_8BIT;
-    hspi2.Init.CLKPolarity       = SPI_POLARITY_LOW;
-    hspi2.Init.CLKPhase          = SPI_PHASE_1EDGE;
-    hspi2.Init.NSS               = SPI_NSS_HARD_INPUT;
-    hspi2.Init.FirstBit          = SPI_FIRSTBIT_MSB;
-    hspi2.Init.TIMode            = SPI_TIMODE_DISABLE;
-    hspi2.Init.CRCCalculation    = SPI_CRCCALCULATION_DISABLE;
-    hspi2.Init.CRCPolynomial     = 10;
-
-    if (HAL_SPI_Init(&hspi2) != HAL_OK) {
-        TRACE_LN(" ESP32 SPI2 HAL init failed!");
-        return;
-    }
-
-    /* 使能 SPI2 (不启用中断, 完全轮询) */
-    __HAL_SPI_ENABLE(&hspi2);
-
-    esp32_status |= 0x01;
-    TRACE("e");
-    DBG("ESP32", "SPI slave poll init OK");
-}
-
-/* ========================== 轮询收帧 ========================== */
-
-/**
- * @brief 轮询方式从 SPI2 接收完整帧
- * @note  NSS=LO → 等待 RXNE → 读 DR → 直到 NSS=HI 或满 14 字节
- *        不依赖 HAL 中断, 在 FreeRTOS 任务中安全调用
- * @return 收到的字节数
- */
-static uint16_t spi_poll_rx_frame(uint8_t *buf, uint16_t max_len)
-{
-    /* 快速检测 NSS: 只检查一次, 不阻塞 */
-    if (GPIOB->IDR & GPIO_PIN_12) {
-        return 0;  /* NSS 高, 主站未选中, 立即返回 */
-    }
-
-    uint16_t count = 0;
-
-    /* 清 OVR (上次可能残留) */
-    if (SPI2->SR & SPI_SR_OVR) {
-        volatile uint8_t dummy = SPI2->DR;
-        (void)dummy;
-        __HAL_SPI_CLEAR_OVRFLAG(&hspi2);
-    }
-
-    /* 预加载 MISO 响应字节（告诉 ESP32 当前命令） */
-    if (g_miso_pending) {
-        /* 写 DR 前检查 TXE（发送缓冲区空） */
-        if (SPI2->SR & SPI_SR_TXE) {
-            *(volatile uint8_t*)&SPI2->DR = g_miso_cmd;
-            g_miso_pending = 0;
-        }
-    }
-
-    /* NSS 低电平期间逐个接收字节 */
-    while (count < max_len) {
-        /* 等待 RXNE, 快速自旋 (~100us 超时) */
-        uint32_t byte_timeout = 20000;
-        while (!(SPI2->SR & SPI_SR_RXNE) && byte_timeout > 0) {
-            byte_timeout--;
-        }
-        if (byte_timeout == 0) break;
-
-        buf[count++] = (uint8_t)(SPI2->DR);
-
-        /* 收到一个字节后，预加载下一个 MISO 响应（保持命令持续） */
-        if (SPI2->SR & SPI_SR_TXE) {
-            *(volatile uint8_t*)&SPI2->DR = g_miso_cmd;
-        }
-
-        /* NSS 恢复高电平 → 帧结束 */
-        if (GPIOB->IDR & GPIO_PIN_12) break;
-    }
-
-    return count;
-}
-
-/* ========================== OTA 帧校验 ========================== */
-
-/** 计算 OTA 帧的校验和 (从 byte[2] 到倒数第2字节) */
-static uint8_t ota_checksum(const uint8_t *frame, uint16_t len)
-{
-    uint8_t sum = 0;
-    for (uint16_t i = 2; i < len - 1; i++) {
-        sum += frame[i];
-    }
-    return sum;
-}
-
-/** 检查是否为 OTA 帧并分发到回调 */
-static bool esp32_handle_ota_frame(const uint8_t *frame, uint16_t len)
-{
-    if (len < 6) return false;  /* 最小帧: 2hdr+1type+2data+1crc */
-
-    uint8_t type = frame[2];
-
-    /* 校验 CRC */
-    if (frame[len - 1] != ota_checksum(frame, len)) {
-        spi_crc_errors++;
-        DBG("ESP32", "OTA CRC error");
-        return false;
-    }
-
-    /* 分发到回调 */
-    if (g_esp32_ota_frame_cb) {
-        g_esp32_ota_frame_cb(type, frame, len);
-    }
-
-    DBG_FMT("ESP32", "OTA frame type=0x%02X len=%d", type, len);
-    return true;
-}
-
-/* ========================== 任务 ========================== */
-
-void esp32_task(void *pvParameters)
-{
-    (void)pvParameters;
-    vTaskDelay(pdMS_TO_TICKS(500));
-    DBG("ESP32", "task started (poll mode)");
-
-    uint32_t last_heartbeat = 0;
-    uint32_t frame_count = 0;
-
-    while (true) {
-        /* 自动清除超时的 MISO 命令 (不依赖 NSS, 始终执行) */
-        if (g_miso_cmd != ESP32_CMD_IDLE) {
-            if (HAL_GetTick() - g_miso_cmd_set_ms > MISO_CMD_TIMEOUT_MS) {
-                g_miso_cmd = ESP32_CMD_IDLE;
-                g_miso_pending = 1;
-                if (SPI2->SR & SPI_SR_TXE) {
-                    *(volatile uint8_t*)&SPI2->DR = ESP32_CMD_IDLE;  /* 立即写入DR覆盖旧值 */
-                }
-                DBG("ESP32", "MISO cmd timeout, cleared to IDLE");
-            }
-        }
-
-        /* ─── 轮询收帧 (大缓冲, 支持 OTA 可变长度) ─── */
-        uint16_t len = spi_poll_rx_frame(ota_rx_buf, ESP32_OTA_FRAME_MAX);
-
-        if (len >= 3) {
-            uint8_t type = ota_rx_buf[2];
-            bool is_ota = (type == ESP32_FRAME_OTA_HANDSHAKE
-                        || type == ESP32_FRAME_OTA_DATA
-                        || type == ESP32_FRAME_OTA_RESULT);
-
-            if (is_ota) {
-                /* OTA 帧处理 */
-                esp32_handle_ota_frame(ota_rx_buf, len);
-            } else if (len == ESP32_SPI_FRAME_LEN && type == ESP32_FRAME_SENSOR) {
-                /* 传感器帧: 复制到传感器专用缓冲并解析 */
-                memcpy(spi_rx_buf, ota_rx_buf, ESP32_SPI_FRAME_LEN);
-                frame_count++;
-
-                if (esp32_parse_frame(spi_rx_buf)) {
-                    esp32_status |= 0x02;  /* 标记收到有效帧 */
-                    modbus_reg_set(REG_TEMP_X100,  (uint16_t)g_esp32_data.temp_x100);
-                    modbus_reg_set(REG_HUMI_X100,  (uint16_t)g_esp32_data.humi_x100);
-                    modbus_reg_set(REG_CO2,        (uint16_t)g_esp32_data.co2);
-                    modbus_reg_set(REG_NH3_X100,   (uint16_t)g_esp32_data.nh3_x100);
-                    modbus_reg_set(REG_LUX_X100,   (uint16_t)g_esp32_data.lux_x100);
-                }
-            }
-        }
-
-        /* ─── 诊断心跳 ─── */
-        if (millis() - last_heartbeat >= 30000) {
-            last_heartbeat = millis();
-            uint16_t sr = SPI2->SR;
-            bool nss = (GPIOB->IDR & GPIO_PIN_12) != 0;
-            DEBUG_SERIAL.print("[ESP32.DIAG] SR=0x"); DEBUG_SERIAL.print(sr, HEX);
-            DEBUG_SERIAL.print(" NSS="); DEBUG_SERIAL.print(nss ? "HI" : "LO");
-            DEBUG_SERIAL.print(" frames="); DEBUG_SERIAL.print(frame_count);
-            DEBUG_SERIAL.print(" crc_err="); DEBUG_SERIAL.print(spi_crc_errors);
-            DEBUG_SERIAL.println();
-            DEBUG_SERIAL.flush();
-        }
-
-        modbus_reg_set(REG_ESP32_STATUS, esp32_status);
-
-        /* 有数据/MISO命令活跃时 1ms 轮询, 无数据时 20ms 释放 CPU */
-        uint32_t delay_ms = (len >= 3) ? 1 : 20;
-        if (g_miso_cmd != ESP32_CMD_IDLE) {
-            delay_ms = 1;  /* MISO 命令活跃 → 加速轮询以捕获 ESP32 响应帧 */
-        }
-        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    for (uint16_t i = 0; i < RX_BUF_LEN; i++) {
+        g_dma_tx_buf[i] = get_miso_byte();
     }
 }
 
-/* ========================== 公共接口 ========================== */
+/* ========================== 握手状态机 API ========================== */
 
-uint16_t esp32_get_status(void)
+static void hs_enter_state(Esp32HsState_t new_state)
 {
-    return esp32_status;
-}
+    g_hs_state = new_state;
+    g_hs_state_enter_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
-void esp32_get_data(Esp32SensorData *out)
-{
-    if (out) {
-        memcpy(out, &g_esp32_data, sizeof(Esp32SensorData));
+    if (new_state == HS_RESPONSE) {
+        hs_build_resp();
+        g_hs_resp_idx    = 0;
+        g_hs_resp_active = true;
+    } else {
+        g_hs_resp_active = false;
+        g_hs_resp_idx    = 0;
     }
+
+    /* MISO 字节模式已改变 → 重新填充 TX DMA 缓冲 */
+    miso_dma_refill();
 }
+
+/** 构建 MISO 握手响应帧 (9B) */
+static void hs_build_resp(void)
+{
+    uint32_t ver = FIRMWARE_VERSION;
+    g_hs_resp_buf[0] = ESP32_MISO_HS_RESP_HDR0;  /* 0xBB */
+    g_hs_resp_buf[1] = ESP32_MISO_HS_RESP_HDR1;  /* 0x66 */
+    g_hs_resp_buf[2] = (uint8_t)g_hs_state;      /* STM32 握手状态 */
+    g_hs_resp_buf[3] = (ver >> 24) & 0xFF;        /* 固件版本 大端 */
+    g_hs_resp_buf[4] = (ver >> 16) & 0xFF;
+    g_hs_resp_buf[5] = (ver >> 8)  & 0xFF;
+    g_hs_resp_buf[6] = (ver)       & 0xFF;
+    g_hs_resp_buf[7] = g_hs_boot_status;          /* boot_status */
+    g_hs_resp_buf[8] = crc8_sum(g_hs_resp_buf, 8); /* CRC8 */
+}
+
+Esp32HsState_t esp32_get_hs_state(void)  { return g_hs_state; }
+bool esp32_hs_ready(void)                 { return g_hs_state == HS_READY; }
+
+void esp32_hs_heartbeat_rx(void)
+{
+    g_hs_last_heartbeat_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+}
+
+uint8_t esp32_hs_get_boot_status(void)    { return g_hs_boot_status; }
+void    esp32_hs_set_boot_status(uint8_t s) { g_hs_boot_status = s; }
+
+/* ========================== BOOT_REPORT (保留兼容) ========================== */
+
+#define BOOT_REPORT_LEN   10
+static uint8_t  g_boot_report[BOOT_REPORT_LEN];
+static uint8_t  g_boot_report_idx;
+static bool     g_boot_report_active;
+static uint32_t g_boot_report_set_ms;
+
+void boot_report_start(uint32_t version, uint8_t boot_status)
+{
+    g_boot_report[0] = ESP32_CMD_OTA_START;          /* MISO 命令前缀 */
+    g_boot_report[1] = ESP32_FRAME_HEADER0;           /* 0xAA */
+    g_boot_report[2] = ESP32_FRAME_HEADER1;           /* 0x55 */
+    g_boot_report[3] = ESP32_FRAME_BOOT_REPORT;       /* 0x02 */
+    g_boot_report[4] = (version >> 24) & 0xFF;
+    g_boot_report[5] = (version >> 16) & 0xFF;
+    g_boot_report[6] = (version >> 8)  & 0xFF;
+    g_boot_report[7] = (version)       & 0xFF;
+    g_boot_report[8] = boot_status;
+    g_boot_report[9] = crc8_sum(g_boot_report + 1, 8); /* offset 1..8 */
+    g_boot_report_idx    = 0;
+    g_boot_report_active = true;
+    g_boot_report_set_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+    miso_dma_refill();  /* MISO 模式已变 */
+}
+
+void boot_report_stop(void)
+{
+    g_boot_report_active = false;
+    g_boot_report_idx    = 0;
+    miso_dma_refill();  /* MISO 模式已变 */
+}
+
+/* ========================== MISO 命令 ========================== */
 
 void esp32_set_miso_cmd(uint8_t cmd)
 {
-    g_miso_cmd = cmd;
-    g_miso_pending = 1;
-    g_miso_cmd_set_ms = HAL_GetTick();  /* 记录时间戳，用于超时自动清除 */
-    /* 预加载到 DR（如果 TXE 已经就绪） */
-    if (SPI2->SR & SPI_SR_TXE) {
-        *(volatile uint8_t*)&SPI2->DR = cmd;
-        g_miso_pending = 0;
-    }
+    g_miso_cmd         = cmd;
+    g_miso_cmd_set_ms  = xTaskGetTickCount() * portTICK_PERIOD_MS;
+    miso_dma_refill();  /* MISO 字节已变 */
 }
 
 void esp32_clear_miso_cmd(void)
 {
     g_miso_cmd = ESP32_CMD_IDLE;
-    g_miso_pending = 1;
-    if (SPI2->SR & SPI_SR_TXE) {
-        *(volatile uint8_t*)&SPI2->DR = ESP32_CMD_IDLE;  /* 立即写入DR覆盖旧值 */
+    miso_dma_refill();
+}
+
+/* ========================== MISO 字节选择 ========================== */
+/**
+ * 根据当前上下文选择 MISO 输出字节:
+ *   1. HS_RESPONSE 状态: 循环输出 9B 握手响应帧
+ *   2. BOOT_REPORT 激活: 循环输出 10B BOOT_REPORT (向后兼容)
+ *   3. 默认: 输出命令字节 g_miso_cmd
+ */
+static uint8_t get_miso_byte(void)
+{
+    if (g_hs_resp_active) {
+        uint8_t b = g_hs_resp_buf[g_hs_resp_idx];
+        g_hs_resp_idx++;
+        if (g_hs_resp_idx >= ESP32_HS_RESP_LEN) g_hs_resp_idx = 0;
+        return b;
+    }
+
+    if (g_boot_report_active) {
+        uint8_t b = g_boot_report[g_boot_report_idx];
+        g_boot_report_idx++;
+        if (g_boot_report_idx >= BOOT_REPORT_LEN) g_boot_report_idx = 0;
+        return b;
+    }
+
+    return g_miso_cmd;
+}
+
+/* ========================== SPI 初始化 (DMA 模式) ========================== */
+
+void esp32_init(void)
+{
+    /* ---- GPIO 时钟 ---- */
+    __HAL_RCC_SPI2_CLK_ENABLE();
+    __HAL_RCC_DMA1_CLK_ENABLE();
+    __HAL_RCC_SYSCFG_CLK_ENABLE();
+
+    /* ---- GPIO 配置 ---- */
+    GPIO_InitTypeDef gpio = {0};
+    gpio.Mode      = GPIO_MODE_AF_PP;
+    gpio.Pull      = GPIO_NOPULL;
+    gpio.Speed     = GPIO_SPEED_FREQ_HIGH;
+    gpio.Alternate = ESP_SPI_AF;
+
+    gpio.Pin = ESP_PIN_SCK;
+    HAL_GPIO_Init(ESP_SPI_PORT, &gpio);
+
+    gpio.Pin = ESP_PIN_MISO;
+    HAL_GPIO_Init(ESP_SPI_PORT, &gpio);
+
+    gpio.Pin = ESP_PIN_MOSI;
+    HAL_GPIO_Init(ESP_SPI_PORT, &gpio);
+
+    /* NSS 引脚仅用于 EXTI 帧检测, SPI 使用软件 NSS 模式 */
+    gpio.Pin  = ESP_PIN_NSS;
+    gpio.Mode = GPIO_MODE_INPUT;
+    gpio.Pull = GPIO_PULLUP;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(ESP_SPI_PORT, &gpio);
+
+    /* ---- SPI2 从机配置 ---- */
+    g_spi.Instance            = ESP_SPI;
+    g_spi.Init.Mode           = SPI_MODE_SLAVE;
+    g_spi.Init.Direction      = SPI_DIRECTION_2LINES;
+    g_spi.Init.DataSize       = SPI_DATASIZE_8BIT;
+    g_spi.Init.CLKPolarity    = SPI_POLARITY_LOW;   /* CPOL=0 */
+    g_spi.Init.CLKPhase       = SPI_PHASE_1EDGE;    /* CPHA=0 */
+    g_spi.Init.NSS            = SPI_NSS_SOFT;       /* 软件模式: SPI 始终激活, EXTI 管理帧检测 */
+    g_spi.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+    g_spi.Init.FirstBit       = SPI_FIRSTBIT_MSB;
+    g_spi.Init.TIMode         = SPI_TIMODE_DISABLE;
+    g_spi.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+    g_spi.Init.CRCPolynomial  = 7;
+    HAL_SPI_Init(&g_spi);
+
+    /* NSS_SOFT 模式下 HAL 默认 SSI=1 (从机未选中),
+     * 需清除 SSI 使从机始终处于选中状态, 否则不响应 SCK */
+    CLEAR_BIT(ESP_SPI->CR1, SPI_CR1_SSI);
+
+    /* ---- 使能 SPI FIFO (4级, 降低 OVR 风险) ---- */
+    ESP_SPI->CR2 |= (1UL << 12);  /* CR2 bit12 FRXTH=1 */
+
+    /* ---- 预填 TX DMA 缓冲 (全部填充当前 MISO 字节模式) ---- */
+    miso_dma_refill();
+
+    /* ---- 配置 SPI2 RX DMA (DMA1_Stream3, Channel 0) ---- */
+    DMA_HandleTypeDef hdma_rx = {0};
+    hdma_rx.Instance                 = DMA1_Stream3;
+    hdma_rx.Init.Channel             = DMA_CHANNEL_0;      /* SPI2_RX */
+    hdma_rx.Init.Direction           = DMA_PERIPH_TO_MEMORY;
+    hdma_rx.Init.PeriphInc           = DMA_PINC_DISABLE;
+    hdma_rx.Init.MemInc              = DMA_MINC_ENABLE;
+    hdma_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_rx.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
+    hdma_rx.Init.Mode                = DMA_CIRCULAR;
+    hdma_rx.Init.Priority            = DMA_PRIORITY_VERY_HIGH;
+    hdma_rx.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+    hdma_rx.Init.FIFOThreshold       = DMA_FIFO_THRESHOLD_FULL;
+    hdma_rx.Init.MemBurst            = DMA_MBURST_SINGLE;
+    hdma_rx.Init.PeriphBurst         = DMA_PBURST_SINGLE;
+    HAL_DMA_Init(&hdma_rx);
+    __HAL_LINKDMA(&g_spi, hdmarx, hdma_rx);
+
+    /* ---- 配置 SPI2 TX DMA (DMA1_Stream4, Channel 0) ---- */
+    DMA_HandleTypeDef hdma_tx = {0};
+    hdma_tx.Instance                 = DMA1_Stream4;
+    hdma_tx.Init.Channel             = DMA_CHANNEL_0;      /* SPI2_TX */
+    hdma_tx.Init.Direction           = DMA_MEMORY_TO_PERIPH;
+    hdma_tx.Init.PeriphInc           = DMA_PINC_DISABLE;
+    hdma_tx.Init.MemInc              = DMA_MINC_ENABLE;
+    hdma_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+    hdma_tx.Init.MemDataAlignment    = DMA_MDATAALIGN_BYTE;
+    hdma_tx.Init.Mode                = DMA_CIRCULAR;
+    hdma_tx.Init.Priority            = DMA_PRIORITY_HIGH;
+    hdma_tx.Init.FIFOMode            = DMA_FIFOMODE_DISABLE;
+    hdma_tx.Init.FIFOThreshold       = DMA_FIFO_THRESHOLD_FULL;
+    hdma_tx.Init.MemBurst            = DMA_MBURST_SINGLE;
+    hdma_tx.Init.PeriphBurst         = DMA_PBURST_SINGLE;
+    HAL_DMA_Init(&hdma_tx);
+    __HAL_LINKDMA(&g_spi, hdmatx, hdma_tx);
+
+    /* ---- 启动 DMA 传输 (循环模式, 始终运行) ---- */
+    HAL_DMA_Start(&hdma_rx, (uint32_t)&ESP_SPI->DR, (uint32_t)g_dma_rx_buf, RX_BUF_LEN);
+    HAL_DMA_Start(&hdma_tx, (uint32_t)g_dma_tx_buf, (uint32_t)&ESP_SPI->DR, RX_BUF_LEN);
+
+    /* ---- 使能 SPI DMA 请求 ---- */
+    __HAL_SPI_ENABLE(&g_spi);
+    ESP_SPI->CR2 |= SPI_CR2_RXDMAEN | SPI_CR2_TXDMAEN;
+
+    /* ---- 初始化 NDTR 追踪 ---- */
+    g_dma_prev_ndtr    = RX_BUF_LEN;
+    g_spi_frame_ready  = false;
+    g_spi_active       = false;
+
+    /* ---- NSS (PB12) EXTI: attachInterrupt 双沿触发 ---- */
+    attachInterrupt(digitalPinToInterrupt(ESP_PIN_NSS_PIN), nss_isr_callback, CHANGE);
+
+    /* ---- 初始状态 ---- */
+    hs_enter_state(HS_INIT);
+    g_hs_last_heartbeat_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+    memset(&g_sensor, 0, sizeof(g_sensor));
+    g_status = 0;
+}
+
+/* ========================== NSS EXTI 回调 (attachInterrupt CHANGE) ========================== */
+
+static void nss_isr_callback(void)
+{
+    if (HAL_GPIO_ReadPin(ESP_SPI_PORT, ESP_PIN_NSS) == GPIO_PIN_RESET) {
+        /* 下降沿: 帧开始 (仅记录, 实际位置由 DMA NDTR 追踪) */
+    } else {
+        /* 上升沿: 帧结束 */
+        uint16_t curr_ndtr = (uint16_t)DMA1_Stream3->NDTR;
+        uint16_t prev      = g_dma_prev_ndtr;
+        g_dma_prev_ndtr    = curr_ndtr;
+
+        /* 计算帧长 */
+        uint16_t frame_len;
+        if (curr_ndtr == prev) {
+            frame_len = RX_BUF_LEN;
+        } else if (curr_ndtr < prev) {
+            frame_len = prev - curr_ndtr;
+        } else {
+            frame_len = (RX_BUF_LEN - curr_ndtr) + prev;
+        }
+        if (frame_len < 10) return;
+
+        /* 写入环形队列槽 (满则覆盖最旧帧) */
+        {
+            uint8_t slot = rx_q_wr;
+            uint8_t next = (slot + 1) % RX_Q_SIZE;
+            if (next == rx_q_rd) rx_q_rd = (rx_q_rd + 1) % RX_Q_SIZE;
+
+            uint16_t dma_pos = (RX_BUF_LEN - prev) % RX_BUF_LEN;
+            uint8_t *dest = rx_q_buf[slot];
+            if (dma_pos + frame_len <= RX_BUF_LEN) {
+                memcpy(dest, g_dma_rx_buf + dma_pos, frame_len);
+            } else {
+                uint16_t part1 = RX_BUF_LEN - dma_pos;
+                memcpy(dest, g_dma_rx_buf + dma_pos, part1);
+                memcpy(dest + part1, g_dma_rx_buf, frame_len - part1);
+            }
+            rx_q_len[slot] = frame_len;
+            rx_q_wr = next;
+        }
+
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        if (g_esp32_task_handle)
+            vTaskNotifyGiveFromISR(g_esp32_task_handle, &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+}
+
+/* ========================== 帧处理 ========================== */
+
+static void process_frame(uint8_t *buf, uint16_t len)
+{
+    if (len < 3) return;
+
+    uint16_t start = 0;
+    bool found = false;
+    for (uint16_t i = 0; i < len - 1; i++) {
+        if (buf[i] == 0xAA && buf[i + 1] == 0x55) { start = i; found = true; break; }
+    }
+    if (!found) { rx_frame_total++; return; }
+
+    uint16_t effective_len = len - start;
+    if (start > 0) memmove(buf, buf + start, effective_len);
+
+    uint8_t type = buf[2];
+
+    /* 确定此帧类型的 CRC 覆盖载荷长度 */
+    uint16_t crc_payload;
+    uint8_t  min_len;
+
+    switch (type) {
+    case ESP32_FRAME_HANDSHAKE_REQ:
+    case ESP32_FRAME_HANDSHAKE_ACK:
+    case ESP32_FRAME_HEARTBEAT:
+        crc_payload = 2;
+        min_len     = 5;
+        break;
+
+    case ESP32_FRAME_SENSOR:
+        crc_payload = 11;
+        min_len     = 14;
+        break;
+
+    case ESP32_FRAME_OTA_HANDSHAKE:
+        crc_payload = 41;
+        min_len     = 44;
+        break;
+
+    case ESP32_FRAME_OTA_RESULT:
+        crc_payload = 3;
+        min_len     = 6;
+        break;
+
+    case ESP32_FRAME_OTA_DATA:
+        if (effective_len < 10) return;
+        {
+            uint16_t chunk = ((uint16_t)buf[7] << 8) | buf[8];
+            if (chunk > 512) return;
+            crc_payload = 7 + chunk;
+            min_len     = 10 + chunk;
+        }
+        break;
+
+    default:
+        rx_frame_total++;
+        rx_frame_bad_type++;
+        return;
+    }
+
+    if (effective_len < min_len) {
+        rx_frame_total++;
+        return;
+    }
+
+    uint8_t crc_exp = crc8_sum(buf + 2, crc_payload);
+    uint8_t crc_rx  = buf[2 + crc_payload];
+
+    if (crc_rx != crc_exp) {
+        rx_frame_total++;
+        rx_frame_bad_crc++;
+        return;
+    }
+
+    rx_frame_total++;
+    rx_frame_ok++;
+    rx_last_type = type;  /* 记录最近通过的帧类型 */
+
+    switch (type) {
+    case ESP32_FRAME_HANDSHAKE_REQ:
+        if (g_hs_state == HS_INIT || g_hs_state == HS_READY) {
+            hs_enter_state(HS_RESPONSE);
+        }
+        break;
+
+    case ESP32_FRAME_HANDSHAKE_ACK:
+        if (g_hs_state == HS_RESPONSE) {
+            hs_enter_state(HS_READY);
+            if (g_esp32_ota_frame_cb) {
+                g_esp32_ota_frame_cb(type, buf, effective_len);
+            }
+        }
+        if (g_hs_state == HS_READY) {
+            esp32_hs_heartbeat_rx();
+        }
+        break;
+
+    case ESP32_FRAME_HEARTBEAT:
+        esp32_hs_heartbeat_rx();
+        break;
+
+    case ESP32_FRAME_SENSOR:
+        {
+            if (effective_len >= SENSOR_FRAME_LEN) {
+                buf[SENSOR_FRAME_LEN] = 0;
+                g_sensor.temp_x100 = ((int16_t)buf[3]  << 8) | buf[4];
+                g_sensor.humi_x100 = ((int16_t)buf[5]  << 8) | buf[6];
+                g_sensor.co2       = ((int16_t)buf[7]  << 8) | buf[8];
+                g_sensor.nh3_x100  = ((int16_t)buf[9]  << 8) | buf[10];
+                g_sensor.lux_x100  = ((int16_t)buf[11] << 8) | buf[12];
+                g_sensor.valid     = true;
+                g_sensor.update_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                g_status |= 0x02;
+            }
+        }
+        break;
+
+    case ESP32_FRAME_OTA_HANDSHAKE:
+    case ESP32_FRAME_OTA_DATA:
+    case ESP32_FRAME_OTA_RESULT:
+        if (g_hs_state == HS_READY) {
+            if (g_esp32_ota_frame_cb) {
+                g_esp32_ota_frame_cb(type, buf, effective_len);
+            }
+        }
+        break;
+
+    default:
+        break;
+    }
+}
+
+/* ========================== 查询接口 ========================== */
+
+uint16_t esp32_get_status(void) { return g_status; }
+
+void esp32_get_data(Esp32SensorData *out)
+{
+    if (out) {
+        *out = g_sensor;
+    }
+}
+
+/* ========================== FreeRTOS 任务 ========================== */
+
+void esp32_task(void *pvParameters)
+{
+    (void)pvParameters;
+
+    g_esp32_task_handle = xTaskGetCurrentTaskHandle();
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    for (;;) {
+        /* 每循环修复 GPIOB: LCD 初始化会用 GPIOB->MODER = xxx 全量覆盖 */
+        {
+            GPIO_InitTypeDef fix = {0};
+            fix.Mode      = GPIO_MODE_AF_PP;
+            fix.Pull      = GPIO_NOPULL;
+            fix.Speed     = GPIO_SPEED_FREQ_HIGH;
+            fix.Alternate = ESP_SPI_AF;
+            fix.Pin = ESP_PIN_SCK;   HAL_GPIO_Init(ESP_SPI_PORT, &fix);
+            fix.Pin = ESP_PIN_MISO;  HAL_GPIO_Init(ESP_SPI_PORT, &fix);
+            fix.Pin = ESP_PIN_MOSI;  HAL_GPIO_Init(ESP_SPI_PORT, &fix);
+            fix.Mode      = GPIO_MODE_INPUT;
+            fix.Pull      = GPIO_PULLUP;
+            fix.Pin = ESP_PIN_NSS;   HAL_GPIO_Init(ESP_SPI_PORT, &fix);
+        }
+
+        /* 等待 SPI 帧通知 (100ms 超时用于状态机维护) */
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(100));
+
+        /* 排空环形帧队列 (ISR 入队, 任务出队, 无锁安全) */
+        while (rx_q_rd != rx_q_wr) {
+            process_frame(rx_q_buf[rx_q_rd], rx_q_len[rx_q_rd]);
+            rx_q_rd = (rx_q_rd + 1) % RX_Q_SIZE;
+        }
+
+        /* 握手状态机超时检测 */
+        uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+        switch (g_hs_state) {
+        case HS_RESPONSE:
+            if (now - g_hs_state_enter_ms >= HS_ACK_TIMEOUT_MS) {
+                hs_enter_state(HS_INIT);
+            }
+            break;
+
+        case HS_READY:
+            if (now - g_hs_last_heartbeat_ms >= HS_HEARTBEAT_TIMEOUT_MS) {
+                g_status &= ~0x02;
+                hs_enter_state(HS_INIT);
+            }
+            break;
+
+        default:
+            break;
+        }
+
+        /* MISO 命令自动清除 (5s) */
+        if (g_miso_cmd != ESP32_CMD_IDLE && g_hs_state == HS_READY) {
+            if (now - g_miso_cmd_set_ms >= 5000) {
+                g_miso_cmd = ESP32_CMD_IDLE;
+                miso_dma_refill();
+            }
+        }
+
+        /* BOOT_REPORT 超时停用 (15s) */
+        if (g_boot_report_active) {
+            if (now - g_boot_report_set_ms >= 15000) {
+                g_boot_report_active = false;
+                miso_dma_refill();
+            }
+        }
+
+        /* SPI 诊断 (每10秒) */
+        {
+            static uint32_t last_diag = 0;
+            if (now - last_diag >= 10000) {
+                last_diag = now;
+                DBG_FMT("SPI.DIAG", "total=%u ok=%u bad_crc=%u type=%02X hs=%d cmd=%02X",
+                        rx_frame_total, rx_frame_ok, rx_frame_bad_crc,
+                        rx_last_type, (int)g_hs_state, g_miso_cmd);
+            }
+        }
     }
 }

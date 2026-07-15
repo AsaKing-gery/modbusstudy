@@ -9,8 +9,8 @@
 #include <Arduino.h>
 #include "bsp/bsp_config.h"
 
-#define FIRMWARE_VERSION      40501
-#define FIRMWARE_VERSION_STR  "4.05.01"
+#define FIRMWARE_VERSION      40513
+#define FIRMWARE_VERSION_STR  "4.05.13"
 
 void modbus_rtu_init(void);
 void modbus_rtu_task(void *pvParameters);

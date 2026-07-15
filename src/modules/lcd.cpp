@@ -282,10 +282,8 @@ void LCD_DisplayString(uint16_t x, uint16_t y, const char *p) {
 /* ========================== 数字显示 ========================== */
 void LCD_DisplayNumber(uint16_t x, uint16_t y, int32_t number, uint8_t len) {
     char buf[12];
-    if (LCD.ShowNum_Mode == Fill_Zero)
-        snprintf(buf, sizeof(buf), "%0*d", len, (int)number);
-    else
-        snprintf(buf, sizeof(buf), "%*d", len, (int)number);
+    /* 整数部分使用空格填充 (不用前导零, 避免 "0800" 这类显示) */
+    snprintf(buf, sizeof(buf), "%*d", len, (int)number);
     LCD_DisplayString(x, y, buf);
 }
 
@@ -294,10 +292,8 @@ void LCD_DisplayDecimals(uint16_t x, uint16_t y, double decimals, uint8_t int_le
     int int_part = (int)decimals;
     int frac_part = (int)((decimals - int_part) * (dec_len == 1 ? 10.0 : 100.0) + 0.5);
     if (frac_part < 0) frac_part = -frac_part;
-    if (LCD.ShowNum_Mode == Fill_Zero)
-        snprintf(buf, sizeof(buf), "%0*d.%0*d", int_len, int_part, dec_len, frac_part);
-    else
-        snprintf(buf, sizeof(buf), "%*d.%0*d", int_len, int_part, dec_len, frac_part);
+    /* 整数部分用空格填充, 小数部分用零填充 (避免 "025.5", 显示为 " 25.5") */
+    snprintf(buf, sizeof(buf), "%*d.%0*d", int_len, int_part, dec_len, frac_part);
     LCD_DisplayString(x, y, buf);
 }
 

@@ -106,7 +106,7 @@ extern HardwareSerial RS485_SERIAL;                 /**< USART1 实例 */
 #define TASK_PRIO_HMI          4
 #define TASK_PRIO_MODBUS_TCP   2
 #define TASK_PRIO_LCD          3
-#define TASK_PRIO_ESP32        2
+#define TASK_PRIO_ESP32        4
 
 /* ========================== Modbus 寄存器地址定义 ========================== */
 /** 保持寄存器 (Holding Registers) */

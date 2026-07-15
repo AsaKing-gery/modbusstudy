@@ -1,6 +1,6 @@
 /**
  * @file    main.cpp
- * @brief   系统入口 - 畜畜养殖巡检系统 v4.05.01
+ * @brief   系统入口 - 畜畜养殖巡检系统 v4.05.12
  * @note    STM32F407VET6 / FreeRTOS / Arduino 框架
  *
  * 硬件接线清单:

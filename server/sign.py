@@ -39,7 +39,7 @@ def sign_file(fw_path: str, sig_path: str) -> bool:
     signature = h.digest()
 
     with open(sig_path, "wb") as f:
-        f.write(signature)
+        f.write(signature.hex().upper().encode())  # 64-char HEX for ESP32 parser
 
     print(f"[OK] 签名文件已生成: {sig_path}")
     print(f"[INFO] HMAC-SHA256: {signature.hex().upper()}")

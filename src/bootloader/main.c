@@ -96,25 +96,10 @@ static void IWDG_Init_30s(void)
     HAL_IWDG_Init(&hiwdg);
 }
 
-/* ========================== 外设复位（跳转前清理） ========================== */
+/* ========================== 跳转前轻量清理 ========================== */
 static void deinit_peripherals(void)
 {
     __disable_irq();
-
-    /* 复位所有外设时钟 */
-    RCC->AHB1RSTR  = 0xFFFFFFFF;
-    RCC->AHB2RSTR  = 0xFFFFFFFF;
-    RCC->AHB3RSTR  = 0xFFFFFFFF;
-    RCC->APB1RSTR  = 0xFFFFFFFF;
-    RCC->APB2RSTR  = 0xFFFFFFFF;
-    __DSB();
-    __ISB();
-
-    RCC->AHB1RSTR  = 0;
-    RCC->AHB2RSTR  = 0;
-    RCC->AHB3RSTR  = 0;
-    RCC->APB1RSTR  = 0;
-    RCC->APB2RSTR  = 0;
 
     /* 关闭所有中断 */
     for (int i = 0; i < 8; i++) {
@@ -133,27 +118,63 @@ static void deinit_peripherals(void)
 }
 
 /* ========================== 跳转到 APP ========================== */
-static void jump_to_app(uint32_t app_addr)
+/**
+ * @brief  跳转到 APP 固件
+ * @note   使用内联汇编执行 MSP 切换和跳转，避免 C 函数尾声 (pop) 
+ *         从新栈 (0x20020000 = SRAM 边界外) 恢复寄存器导致 BusFault。
+ *         128KB SRAM 的有效地址范围: 0x20000000 ~ 0x2001FFFF。
+ */
+static __attribute__((noreturn)) void jump_to_app(uint32_t app_addr)
 {
     uint32_t stack_ptr     = *(volatile uint32_t*)app_addr;
     uint32_t reset_handler = *(volatile uint32_t*)(app_addr + 4);
 
+    /* 固件按 APP1 (0x08020000) 编译, 若目标分区不是 APP1 则重映射入口 */
+    if (app_addr != APP1_START) {
+        uint32_t fw_offset = reset_handler - APP1_START;
+        reset_handler = app_addr + fw_offset;
+    }
+
     deinit_peripherals();
 
     SCB->VTOR = app_addr;
-    __set_MSP(stack_ptr);
-    __DSB();
-    __ISB();
 
     /* PRIMASK 已由 deinit_peripherals() 恢复到 0 */
 
-    void (*app_reset)(void) = (void (*)(void))reset_handler;
-    app_reset();  /* 永不返回 */
+    /* 通过内联汇编切换 MSP 并跳转。
+     * 绝不能在 C 函数内先 __set_MSP() 再让编译器生成 pop/bx，
+     * 因为函数尾声中 push/pop 的寄存器在原栈上，而 __set_MSP 已切换栈指针。 */
+    __asm volatile (
+        "msr msp, %0    \n\t"
+        "dsb            \n\t"
+        "isb            \n\t"
+        "bx  %1         \n\t"
+        :
+        : "r" (stack_ptr), "r" (reset_handler)
+        : "memory"
+    );
+
+    __builtin_unreachable();
 }
 
 /* ========================== 校验固件签名 ========================== */
 static bool verify_firmware_signature(uint32_t app_addr, const uint8_t *expected_sig)
 {
+    /* ── 阶段 1: 快速向量表完整性检查 ── */
+    /* 读取 APP 镜像的前 8 字节: [SP_init][Reset_Handler] */
+    uint32_t sp = *(volatile uint32_t*)app_addr;
+    uint32_t pc = *(volatile uint32_t*)(app_addr + 4);
+
+    /* SP 必须在 RAM 范围内 (0x20000000 ~ 0x20020000 for STM32F407 128KB SRAM) */
+    if (sp < 0x20000000 || sp > 0x20020000) {
+        return false;
+    }
+
+    /* Reset_Handler 必须在 Flash APP 范围内, 且 LSB=1 (Thumb 模式) */
+    if (pc < APP1_START || pc > (APP2_START + APP_SIZE) || (pc & 1) == 0) {
+        return false;
+    }
+
 #if 0   /* TODO: 启用 HMAC 校验。当前禁用以便调试，生产环境必须开启。 */
     uint8_t calc_sig[HMAC_SHA256_DIGEST_SIZE];
     hmac_sha256(hmac_key, HMAC_KEY_SIZE,
@@ -161,9 +182,8 @@ static bool verify_firmware_signature(uint32_t app_addr, const uint8_t *expected
                 calc_sig);
     return (memcmp(calc_sig, expected_sig, SIGNATURE_SIZE) == 0);
 #endif
-    (void)app_addr;
     (void)expected_sig;
-    return true;   /* 临时信任所有固件 */
+    return true;
 }
 
 /* ========================== 校验结果处理 ========================== */
@@ -176,20 +196,20 @@ static void handle_verify_failed(BootMetadata_t *meta)
     metadata_write(meta);
 
     if (meta->slot[slot].try_count >= meta->slot[slot].max_tries) {
-        /* 当前分区尝试次数耗尽，切换到备用分区 */
         uint8_t alt_slot = slot ^ 1;
 
-        /* 检查备用分区是否有有效签名（signature[0] != 0） */
         if (meta->slot[alt_slot].signature[0] != 0) {
+            /* 切换到备用分区 */
             meta->active_slot = alt_slot;
             meta->slot[alt_slot].try_count = 0;
             metadata_write(meta);
-            /* 复位 → 重新进入 Bootloader，校验备用分区 */
         } else {
-            /* 备用分区无固件，回退到出厂 APP1 */
-            meta->active_slot = 0;
-            meta->slot[0].try_count = 0;
+            /* 两个分区都无效 → 出厂复位: 初始化默认 metadata,
+             * 直接跳 APP1, 不依赖签名 (签名可能已被清空) */
+            metadata_init_default(meta);
             metadata_write(meta);
+            jump_to_app(APP1_START);
+            /* 不返回 */
         }
     }
 
@@ -197,49 +217,77 @@ static void handle_verify_failed(BootMetadata_t *meta)
     /* 不返回 */
 }
 
+/* ========================== 搬移固件: slot1 → slot0 ========================== */
+static void copy_slot1_to_slot0(void)
+{
+    /* 擦除 slot 0 (sector 5, 128KB) */
+    {
+        uint32_t err;
+        FLASH_EraseInitTypeDef e = {0};
+        e.TypeErase = FLASH_TYPEERASE_SECTORS;
+        e.Sector = 5; e.NbSectors = 1;
+        e.VoltageRange = FLASH_VOLTAGE_RANGE_3;
+        HAL_FLASH_Unlock();
+        __disable_irq();
+        HAL_FLASHEx_Erase(&e, &err);
+        __enable_irq();
+        HAL_FLASH_Lock();
+    }
+
+    /* 按字拷贝 APP2 → APP1 (128KB, 32768 字) */
+    HAL_FLASH_Unlock();
+    for (uint32_t i = 0; i < APP_SIZE; i += 4) {
+        uint32_t w = *(volatile uint32_t*)(APP2_START + i);
+        HAL_FLASH_Program(FLASH_TYPEPROGRAM_WORD, APP1_START + i, w);
+    }
+    HAL_FLASH_Lock();
+}
+
 /* ========================== 主入口 ========================== */
 int main(void)
 {
-    /* ── 阶段 1: HAL 初始化 ── */
-    HAL_Init();          /* SysTick, NVIC 优先级分组, 指令/数据缓存 */
+    HAL_Init();
+    system_init();
 
-    /* ── 阶段 2: 系统初始化 ── */
-    system_init();       /* 关闭 WWDG, 配置调试冻结 */
-
-    /* ── 阶段 3: 读取元数据 ── */
     BootMetadata_t meta;
     metadata_read(&meta);
 
     if (meta.magic != MAGIC_VALID) {
-        /* 首次上电 / 元数据损坏 → 初始化出厂默认值，直接启动 APP1 */
         metadata_init_default(&meta);
         metadata_write(&meta);
         jump_to_app(APP1_START);
-        /* 不返回 */
     }
 
-    /* ── 阶段 4: 确定目标分区 ── */
-    uint8_t  slot       = meta.active_slot;
-    uint32_t app_addr   = (slot == 0) ? APP1_START : APP2_START;
-    uint8_t *expected   = meta.slot[slot].signature;
+    /* 始终尝试 slot 1 新固件 (若签名有效 → 搬到 slot 0 → 启动) */
+    if (meta.slot[1].signature[0] != 0) {
+        if (verify_firmware_signature(APP2_START, meta.slot[1].signature)) {
+            /* slot 1 有效, 搬到 slot 0 */
+            copy_slot1_to_slot0();
 
-    /* ── 阶段 5: HMAC-SHA256 签名校验 ── */
-    if (!verify_firmware_signature(app_addr, expected)) {
-        handle_verify_failed(&meta);
-        /* 不返回 */
+            /* 更新 metadata: slot 0 获得 slot 1 的签名 */
+            memcpy(meta.slot[0].signature, meta.slot[1].signature, SIGNATURE_SIZE);
+            meta.slot[0].version = meta.slot[1].version;
+            meta.slot[0].try_count = 0;
+            meta.active_slot = 0;
+            metadata_write(&meta);
+
+            IWDG_Init_30s();
+            jump_to_app(APP1_START);
+        }
     }
 
-    /* ── 阶段 6: 校验通过，准备启动 ── */
-    /* 清除 boot_success（APP 需在 30s 内调用 ota_confirm_success 重新置位） */
-    meta.slot[slot].boot_success = 0x00;
+    /* slot 1 无效或为空 → boot slot 0 */
+    if (meta.slot[0].signature[0] != 0) {
+        if (verify_firmware_signature(APP1_START, meta.slot[0].signature)) {
+            meta.slot[0].boot_success = 0x00;
+            metadata_write(&meta);
+            IWDG_Init_30s();
+            jump_to_app(APP1_START);
+        }
+    }
+
+    /* 两个分区都无效 → 出厂复位 */
+    metadata_init_default(&meta);
     metadata_write(&meta);
-
-    /* ── 阶段 7: 启动 IWDG（30s 超时） ── */
-    IWDG_Init_30s();
-
-    /* ── 阶段 8: 跳转 APP ── */
-    jump_to_app(app_addr);
-
-    /* 永远不会到达这里 */
-    while (1) { __NOP(); }
+    jump_to_app(APP1_START);
 }
