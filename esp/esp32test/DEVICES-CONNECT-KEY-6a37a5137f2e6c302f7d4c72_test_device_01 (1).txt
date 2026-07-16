@@ -1,0 +1,8 @@
+{
+    "username": "6a37a5137f2e6c302f7d4c72_test_device_01",
+    "password": "0975725d0da59a5f640c97e70c948c225128dd3ffcc2dad016fdcb047a3623af",
+    "clientId": "6a37a5137f2e6c302f7d4c72_test_device_01_0_0_2026062308",
+    "hostname": "351feb7508.st1.iotda-device.cn-north-4.myhuaweicloud.com",
+    "port": 8883,
+    "protocol": "MQTTS"
+}
